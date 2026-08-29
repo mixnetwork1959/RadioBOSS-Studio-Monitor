@@ -1,0 +1,33 @@
+{
+  "config_version": 2,
+  "configured": false,
+  "application_title": "RadioBOSS Studio Monitor",
+  "theme": "dark",
+  "active_station": "station-1",
+  "stations": [
+    {
+      "id": "station-1",
+      "name": "My Radio Station",
+      "short_name": "STATION 1",
+      "radioboss_host": "127.0.0.1",
+      "radioboss_port": 9000,
+      "radioboss_user": "",
+      "radioboss_password_protected": "",
+      "accent_color": "#27ff72",
+      "scheduler_events_file": "",
+      "scheduler_admin_sdl": "",
+      "broadcastvoice_status_file": "",
+      "broadcastvoice_dir": ""
+    }
+  ],
+  "refresh_interval_ms": 1500,
+  "start_maximized": true,
+  "playlist_rows": 16,
+  "audio_meter_enabled": true,
+  "weather_enabled": false,
+  "weather_location": "",
+  "weather_latitude": 0.0,
+  "weather_longitude": 0.0,
+  "weather_show_sea_temperature": false,
+  "monitor_port": 8765
+}
