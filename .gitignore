@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+build/
+dist/
+release-package/
+*.spec
+studio_monitor_config.json
+studio-monitor-bootstrap.log
+studio_monitor.pid
+RadioBOSS-Studio-Monitor-v*-Windows.zip
