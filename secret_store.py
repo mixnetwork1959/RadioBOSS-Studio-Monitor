@@ -68,7 +68,7 @@ def protect_secret(value: str) -> str:
         None,
         None,
         None,
-        0x01,
+        0x01,  # CRYPTPROTECT_UI_FORBIDDEN
         ctypes.byref(out_blob),
     ):
         raise ctypes.WinError()
@@ -91,6 +91,7 @@ def unprotect_secret(value: str) -> str:
         except Exception:
             return ""
     if not text.startswith(DPAPI_PREFIX):
+        # Backward compatibility for old, flat Studio Monitor configs.
         return text
     if os.name != "nt":
         return ""

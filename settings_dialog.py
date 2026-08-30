@@ -151,6 +151,8 @@ class SettingsDialog(QDialog):
         tab=QWidget(); form=QFormLayout(tab)
         self.weather_enabled=QCheckBox("Show current weather")
         self.weather_location=QLineEdit(); self.weather_location.setPlaceholderText("e.g. London")
+        # Plain text fields make pasted coordinates work independently of the
+        # Windows decimal locale. Both 43.36957 and 43,36957 are accepted.
         self.weather_lat=QLineEdit(); self.weather_lat.setPlaceholderText("e.g. 43.36957")
         self.weather_lon=QLineEdit(); self.weather_lon.setPlaceholderText("e.g. 28.08081")
         self.weather_sea=QCheckBox("Show sea-surface temperature (coastal stations)")
@@ -168,20 +170,11 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(tab,"Weather")
 
     def _build_integrations_tab(self):
-        tab=QWidget(); form=QFormLayout(tab)
-        self.scheduler_file=QLineEdit()
-        self.scheduler_sdl=QLineEdit()
-        self.broadcastvoice_status=QLineEdit()
-        self.broadcastvoice_dir=QLineEdit()
+        tab=QWidget(); outer=QVBoxLayout(tab)
 
-        scheduler_file_button=QPushButton("Browse…")
-        scheduler_file_button.clicked.connect(
-            lambda:self._browse_file(
-                self.scheduler_file,
-                "Select exported Scheduler events file",
-                "JSON files (*.json);;All files (*.*)",
-            )
-        )
+        scheduler_group=QGroupBox("RadioBOSS Scheduler")
+        scheduler_form=QFormLayout(scheduler_group)
+        self.scheduler_sdl=QLineEdit()
         scheduler_sdl_button=QPushButton("Browse…")
         scheduler_sdl_button.clicked.connect(
             lambda:self._browse_file(
@@ -189,6 +182,18 @@ class SettingsDialog(QDialog):
                 "Select RadioBOSS Scheduler SDL file",
                 "RadioBOSS Scheduler files (*.sdl);;All files (*.*)",
             )
+        )
+        scheduler_sdl_row=QHBoxLayout(); scheduler_sdl_row.addWidget(self.scheduler_sdl,1); scheduler_sdl_row.addWidget(scheduler_sdl_button)
+        scheduler_form.addRow("Scheduler SDL file",scheduler_sdl_row)
+        outer.addWidget(scheduler_group)
+
+        broadcastvoice_group=QGroupBox("BroadcastVoice")
+        broadcastvoice_form=QFormLayout(broadcastvoice_group)
+        self.broadcastvoice_dir=QLineEdit()
+        self.broadcastvoice_status=QLineEdit()
+        broadcastvoice_dir_button=QPushButton("Browse…")
+        broadcastvoice_dir_button.clicked.connect(
+            lambda:self._browse_directory(self.broadcastvoice_dir,"Select BroadcastVoice directory")
         )
         broadcastvoice_status_button=QPushButton("Browse…")
         broadcastvoice_status_button.clicked.connect(
@@ -198,26 +203,19 @@ class SettingsDialog(QDialog):
                 "JSON files (*.json);;All files (*.*)",
             )
         )
-        broadcastvoice_dir_button=QPushButton("Browse…")
-        broadcastvoice_dir_button.clicked.connect(
-            lambda:self._browse_directory(self.broadcastvoice_dir,"Select BroadcastVoice directory")
-        )
-
-        scheduler_file_row=QHBoxLayout(); scheduler_file_row.addWidget(self.scheduler_file,1); scheduler_file_row.addWidget(scheduler_file_button)
-        scheduler_sdl_row=QHBoxLayout(); scheduler_sdl_row.addWidget(self.scheduler_sdl,1); scheduler_sdl_row.addWidget(scheduler_sdl_button)
-        broadcastvoice_status_row=QHBoxLayout(); broadcastvoice_status_row.addWidget(self.broadcastvoice_status,1); broadcastvoice_status_row.addWidget(broadcastvoice_status_button)
         broadcastvoice_dir_row=QHBoxLayout(); broadcastvoice_dir_row.addWidget(self.broadcastvoice_dir,1); broadcastvoice_dir_row.addWidget(broadcastvoice_dir_button)
+        broadcastvoice_status_row=QHBoxLayout(); broadcastvoice_status_row.addWidget(self.broadcastvoice_status,1); broadcastvoice_status_row.addWidget(broadcastvoice_status_button)
+        broadcastvoice_form.addRow("BroadcastVoice directory",broadcastvoice_dir_row)
+        broadcastvoice_form.addRow("BroadcastVoice status file",broadcastvoice_status_row)
+        outer.addWidget(broadcastvoice_group)
 
         info=QLabel(
-            "These integration paths belong to this local station only. Use Browse to select "
-            "the Scheduler and BroadcastVoice files on this computer. Leave them empty when unused."
+            "These integration paths belong to this local station only. Select the RadioBOSS "
+            "Scheduler SDL file and the local BroadcastVoice folder/status file. Leave an integration empty when unused."
         )
         info.setWordWrap(True); info.setObjectName("muted")
-        form.addRow("Scheduler events file",scheduler_file_row)
-        form.addRow("Scheduler SDL file",scheduler_sdl_row)
-        form.addRow("BroadcastVoice status file",broadcastvoice_status_row)
-        form.addRow("BroadcastVoice directory",broadcastvoice_dir_row)
-        form.addRow("",info)
+        outer.addWidget(info)
+        outer.addStretch(1)
         self.tabs.addTab(tab,"Integrations")
 
     def _browse_file(self,field,title,file_filter):
@@ -246,6 +244,7 @@ class SettingsDialog(QDialog):
         self.weather_sea.setChecked(bool(d.get("weather_show_sea_temperature",False)))
 
         stations=d.get("stations") or [copy.deepcopy(backend.DEFAULT_STATION)]
+        # Single-station edition: keep only the first/local station profile.
         self.document["stations"]=[copy.deepcopy(stations[0])]
         self.document["active_station"]=str(self.document["stations"][0].get("id") or "station-1")
         self._load_station_fields(self.document["stations"][0])
@@ -258,7 +257,6 @@ class SettingsDialog(QDialog):
         self.station_user.setText(str(s.get("radioboss_user") or ""))
         self.station_password.setText(str(s.get("radioboss_password") or ""))
         self.station_accent.setText(str(s.get("accent_color") or "#27ff72"))
-        self.scheduler_file.setText(str(s.get("scheduler_events_file") or ""))
         self.scheduler_sdl.setText(str(s.get("scheduler_admin_sdl") or ""))
         self.broadcastvoice_status.setText(str(s.get("broadcastvoice_status_file") or ""))
         self.broadcastvoice_dir.setText(str(s.get("broadcastvoice_dir") or ""))
@@ -276,7 +274,7 @@ class SettingsDialog(QDialog):
             "radioboss_user":self.station_user.text().strip(),
             "radioboss_password":self.station_password.text(),
             "accent_color":self.station_accent.text().strip() or "#27ff72",
-            "scheduler_events_file":self.scheduler_file.text().strip(),
+            "scheduler_events_file":"",
             "scheduler_admin_sdl":self.scheduler_sdl.text().strip(),
             "broadcastvoice_status_file":self.broadcastvoice_status.text().strip(),
             "broadcastvoice_dir":self.broadcastvoice_dir.text().strip(),

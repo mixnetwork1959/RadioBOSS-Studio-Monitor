@@ -1,4 +1,4 @@
-# RadioBOSS Studio Monitor v1.0.1
+# RadioBOSS Studio Monitor v1.0.10
 
 RadioBOSS Studio Monitor is a portable Windows dashboard for one local RadioBOSS installation. It displays the current and next track, remaining time, artwork, current-hour playlist, studio clock, optional weather, optional RadioBOSS Scheduler information, optional BroadcastVoice status and Windows output-level meters.
 
@@ -16,7 +16,7 @@ This public edition contains no station-specific settings, passwords, logs or me
 - RadioBOSS and weather requests run separately, with watchdog recovery
 - Optional Open-Meteo weather and sea-surface temperature
 - Optional read-only Scheduler and BroadcastVoice panels
-- Animated VU meters and a redesigned SL-1210-style turntable
+- Animated VU meters, a responsive DJ jogwheel and a playback-aware 15-second silence alarm
 - RadioBOSS passwords protected with Windows DPAPI for the current Windows user
 
 ## RadioBOSS preparation
@@ -63,10 +63,78 @@ BUILD-EXE.bat
 The script installs the required packages, runs the self-test, builds the portable EXE and creates:
 
 ```text
-RadioBOSS-Studio-Monitor-v1.0.1-Windows.zip
+RadioBOSS-Studio-Monitor-v1.0.10-Windows.zip
 ```
 
 The generated public ZIP contains only the EXE, README and notice. It deliberately excludes configuration and log files.
+
+### Changes in v1.0.10
+
+- enlarged the classic studio clock to use the full available top-row height
+- enlarged both stacked weather tiles and their temperature, pressure and sea-temperature text
+- vertically centred the clock and weather group to remove the remaining empty lower area
+- increased the Scheduler event-card text and padding for better readability
+
+### Changes in v1.0.9
+
+- replaced the large digital clock with a classic studio clock and a smaller precise digital readout
+- enlarged the stacked weather and Black Sea tiles
+- added sea-level air pressure in hPa to the existing weather request
+- added a 15-second silence monitor directly below the RadioBOSS connection status
+- silence monitoring is armed only while RadioBOSS is playing and Windows audio metering is available
+- a confirmed silence alarm flashes bright red and clears automatically when audio returns
+
+### Changes in v1.0.8
+
+- moved the weather and Black Sea displays beside the studio clock as two compact stacked tiles
+- added a circular countdown to the next full hour
+- the countdown turns amber during the final three minutes and flashes red during the final minute
+- added compact NEXT and THEN cards for the next two Scheduler events
+- all new countdown graphics are calculated locally without extra network or audio processing
+
+### Changes in v1.0.7
+
+- added a complete Next Track card beside the current-title information
+- restored next-track artwork without repeated network requests
+- current and next artwork are cached until the corresponding track changes
+- long next-track titles can wrap without pushing the jogwheel out of place
+- removed the temporary one-line Next Track strip
+
+### Changes in v1.0.6
+
+- next track is now a compact text line inside the Current Track panel
+- removed the separate next-track cover and its repeated artwork request
+- Current Track expands across three columns while the jogwheel keeps a sensible width
+- Scheduler, upcoming events, BroadcastVoice and Hour Close share one compact right panel
+- rebalanced row heights to use the reclaimed middle-row space
+
+### Changes in v1.0.5
+
+- taller top row gives both VU meters a natural analogue aspect ratio
+- compacted middle and playlist/tools rows to reclaim unused vertical space
+- weather graphic keeps its existing size
+- audio-device detail is height-limited to avoid wasted space
+
+### Changes in v1.0.4
+
+- wider classic VU scale using nearly the complete meter face
+- all scale numbers are kept inside the display
+- thin face outline replaces the heavy dark housing border
+- clearer red overload arc based on a traditional analogue VU meter
+
+### Changes in v1.0.3
+
+- jogwheel no longer catches up delayed frames with large visible jumps
+- playlist rows and artwork are redrawn only when their contents change
+- Windows build excludes unused PySide6 modules for a smaller, faster-starting EXE
+
+### Changes in v1.0.2
+
+- replaced the scale-sensitive tonearm with a responsive DJ jogwheel
+- rotating cyan marker shows platter movement during playback
+- outer cyan ring shows the current title progress
+- progress ring blinks during the final 15 seconds of a title
+- incomplete RadioBOSS position samples keep the last valid progress value
 
 ### Changes in v1.0.1
 
@@ -77,7 +145,7 @@ The generated public ZIP contains only the EXE, README and notice. It deliberate
 - latitude and longitude can be typed or pasted with a decimal point or comma
 - Save keeps the normal Settings window open; Close returns to the dashboard
 - Browse buttons for Scheduler and BroadcastVoice integration paths
-- integrations are configured for the one local station handled by this installation
+- separate Scheduler and BroadcastVoice integration paths for every station profile
 - selectable Dark and Light themes under General settings
 
 ## Run from source
@@ -109,8 +177,6 @@ All Scheduler and BroadcastVoice access is read-only.
 
 ## Project status
 
-This is the first neutral public build derived from the original private Studio Monitor. Test the Windows EXE with a non-production RadioBOSS installation before publishing it broadly.
-
-No open-source licence has been selected yet; the repository is public for source review and development.
+This is the first neutral public build derived from the original private Studio Monitor. Test the Windows EXE with a non-production RadioBOSS installation before publishing it broadly. Select a source/binary licence before the first external source-code release.
 
 RadioBOSS is a trademark of DJSoft.net. This independent community project is not affiliated with or supported by DJSoft.net.
