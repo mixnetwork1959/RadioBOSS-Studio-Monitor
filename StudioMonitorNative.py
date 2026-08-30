@@ -35,7 +35,7 @@ THEME_PALETTES = {
         "input_border":"#285260", "tab_bg":"#07161e", "tab_text":"#b9dbe5",
         "progress_bg":"#02080d", "table_bg":"#02080d", "table_grid":"#0a222d",
         "header_bg":"#06151d", "row_border":"#07151c", "scroll_bg":"#031016",
-        "scroll_handle":"#008db0", "active_bg":"#062412", "station_active_bg":"#063421",
+        "scroll_handle":"#008db0", "active_bg":"#062412",
         "alert_bg":"#26050a", "table_muted":"#58757f",
     },
     "light": {
@@ -49,7 +49,7 @@ THEME_PALETTES = {
         "input_border":"#80aebc", "tab_bg":"#dfecef", "tab_text":"#365d69",
         "progress_bg":"#dbe8ec", "table_bg":"#ffffff", "table_grid":"#d6e4e8",
         "header_bg":"#dcebf0", "row_border":"#e3edf0", "scroll_bg":"#e2ecef",
-        "scroll_handle":"#5795a8", "active_bg":"#e3f5e9", "station_active_bg":"#dff4e7",
+        "scroll_handle":"#5795a8", "active_bg":"#e3f5e9",
         "alert_bg":"#ffe8ec", "table_muted":"#667d87",
     },
 }
@@ -71,7 +71,6 @@ TEXT = THEME_PALETTES["dark"]["text"]
 MUTED = THEME_PALETTES["dark"]["muted"]
 ACTIVE_BG = THEME_PALETTES["dark"]["active_bg"]
 ALERT_BG = THEME_PALETTES["dark"]["alert_bg"]
-STATION_ACTIVE_BG = THEME_PALETTES["dark"]["station_active_bg"]
 TABLE_MUTED = THEME_PALETTES["dark"]["table_muted"]
 
 
@@ -83,7 +82,7 @@ def apply_theme(app,theme):
     CYAN=colours["cyan"]; GREEN=colours["green"]; AMBER=colours["amber"]; RED=colours["red"]
     PANEL=colours["panel"]; BG=colours["bg"]; TEXT=colours["text"]; MUTED=colours["muted"]
     ACTIVE_BG=colours["active_bg"]; ALERT_BG=colours["alert_bg"]
-    STATION_ACTIVE_BG=colours["station_active_bg"]; TABLE_MUTED=colours["table_muted"]
+    TABLE_MUTED=colours["table_muted"]
     app.setProperty("studioMonitorTheme",name)
     app.setStyleSheet(stylesheet(name))
     for widget in app.topLevelWidgets():
@@ -2081,7 +2080,6 @@ def stylesheet(theme="dark"):
     QPushButton {{ background:{c['button_bg']}; color:{c['button_text']}; border:1px solid {c['border']}; border-radius:6px; padding:7px 10px; font-weight:600; }}
     QPushButton:hover {{ background:{c['button_hover']}; border-color:{c['cyan']}; }}
     QPushButton:pressed {{ background:{c['button_pressed']}; }}
-    QPushButton[stationActive="true"] {{ background:{c['station_active_bg']}; color:{c['green']}; border:2px solid {c['green']}; }}
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QListWidget {{ background:{c['input_bg']}; color:{c['text']}; border:1px solid {c['input_border']}; border-radius:5px; padding:5px; }}
     QComboBox QAbstractItemView {{ background:{c['input_bg']}; color:{c['text']}; selection-background-color:{c['button_hover']}; }}
     QTabWidget::pane {{ border:1px solid {c['input_border']}; border-radius:6px; }}
