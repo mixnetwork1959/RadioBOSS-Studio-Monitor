@@ -1203,7 +1203,7 @@ class StudioMonitor(QMainWindow):
             "current":{"key":"","data":b"","attempt":0.0},
             "next":{"key":"","data":b"","attempt":0.0},
         }
-        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.10")
+        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.11")
         self.resize(1680, 940)
         self.setMinimumSize(900, 620)
 
@@ -1374,7 +1374,9 @@ class StudioMonitor(QMainWindow):
         self.event_in=QLabel("IN —"); self.event_in.setObjectName("cyan")
         self.upcoming_title=QLabel("UPCOMING EVENTS"); self.upcoming_title.setObjectName("cyan")
         self.upcoming_events=[]
-        for _ in range(3):
+        # NEXT EVENT already shows upcoming[0]. List only the two events after
+        # it so the first item is not duplicated and the panel stays compact.
+        for _ in range(2):
             lbl=QLabel("—")
             lbl.setObjectName("muted")
             lbl.setWordWrap(False)
@@ -1726,7 +1728,7 @@ class StudioMonitor(QMainWindow):
             self.timer.setInterval(max(750,int(self.config_doc.get("refresh_interval_ms") or 1500)))
             self._playlist_signature=None
             self._reset_artwork_cache()
-            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.10")
+            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.11")
             self.rebuild_station_buttons()
             self.busy=False; self._weather_busy=False
             self.request_state(); self.request_weather()
@@ -1736,7 +1738,7 @@ class StudioMonitor(QMainWindow):
     def run_diagnose(self):
         cfg=backend.load_config(self.active_station)
         details=[
-            "Studio Monitor v1.0.10",
+            "Studio Monitor v1.0.11",
             f"Configuration: {backend.CONFIG}",
             f"Station: {cfg.get('_station_name') or '—'}",
             f"RadioBOSS: {cfg.get('radioboss_host')}:{cfg.get('radioboss_port')}",
@@ -1865,9 +1867,10 @@ class StudioMonitor(QMainWindow):
         self.event.setToolTip("SOURCE: "+source)
 
         upcoming=sc.get("upcoming") or []
+        following=upcoming[1:3]
         for i,lbl in enumerate(self.upcoming_events):
-            if i < len(upcoming):
-                ev=upcoming[i]
+            if i < len(following):
+                ev=following[i]
                 secs=ev.get("seconds")
                 lbl.setText(
                     f"{i+1}. {ev.get('time') or '—'}  {ev.get('name') or 'Scheduler Event'}"

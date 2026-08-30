@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================================
-echo RadioBOSS Studio Monitor v1.0.10 - Public Windows Build
+echo RadioBOSS Studio Monitor v1.0.11 - Public Windows Build
 echo ============================================================
 echo.
 
@@ -59,7 +59,7 @@ copy /y "%~dp0README.md" "%~dp0release-package\README.md" >nul
 copy /y "%~dp0NOTICE.txt" "%~dp0release-package\NOTICE.txt" >nul
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "Compress-Archive -Path '%~dp0release-package\*' -DestinationPath '%~dp0RadioBOSS-Studio-Monitor-v1.0.10-Windows.zip' -Force"
+  "Compress-Archive -Path '%~dp0release-package\*' -DestinationPath '%~dp0RadioBOSS-Studio-Monitor-v1.0.11-Windows.zip' -Force"
 if errorlevel 1 goto :failed
 
 echo.
@@ -67,7 +67,7 @@ echo ============================================================
 echo BUILD COMPLETE
 echo ============================================================
 echo EXE: %~dp0dist\RadioBOSS-Studio-Monitor.exe
-echo ZIP: %~dp0RadioBOSS-Studio-Monitor-v1.0.10-Windows.zip
+echo ZIP: %~dp0RadioBOSS-Studio-Monitor-v1.0.11-Windows.zip
 echo.
 echo The ZIP contains no configuration, password, or log files.
 pause

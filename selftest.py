@@ -98,6 +98,22 @@ def main():
             check(playlist.get("ok"),playlist.get("error") or "playlist parse failed")
             check(any(x.get("status")=="PLAYING" for x in playlist.get("tracks") or []),"playing row not detected")
             check(backend.weather_state(cfg).get("disabled"),"weather-disabled mode failed")
+
+            # A legacy runtime/state.json path must not bypass the complete
+            # directory-based BroadcastVoice status calculation.
+            bv_root=Path(folder)/"BroadcastVoice"
+            (bv_root/"runtime").mkdir(parents=True)
+            (bv_root/"config.json").write_text(
+                json.dumps({"announcer":"RIGHT-CONFIG","hour_close":{}}),
+                encoding="utf-8",
+            )
+            legacy_state=bv_root/"runtime"/"state.json"
+            legacy_state.write_text(json.dumps({"announcer":"WRONG-RAW-STATE"}),encoding="utf-8")
+            bv=backend.bv_state({
+                "broadcastvoice_dir":str(bv_root),
+                "broadcastvoice_status_file":str(legacy_state),
+            })
+            check(bv.get("announcer")=="RIGHT-CONFIG","legacy BroadcastVoice status file bypassed directory discovery")
     finally:
         backend.CONFIG=original_config
         server.shutdown(); server.server_close()
@@ -111,6 +127,7 @@ def main():
     print("- RadioBOSS playback XML")
     print("- RadioBOSS playlist XML")
     print("- weather-disabled mode")
+    print("- directory-based BroadcastVoice status")
     return 0
 
 

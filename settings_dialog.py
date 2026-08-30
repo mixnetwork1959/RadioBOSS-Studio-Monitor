@@ -190,28 +190,17 @@ class SettingsDialog(QDialog):
         broadcastvoice_group=QGroupBox("BroadcastVoice")
         broadcastvoice_form=QFormLayout(broadcastvoice_group)
         self.broadcastvoice_dir=QLineEdit()
-        self.broadcastvoice_status=QLineEdit()
         broadcastvoice_dir_button=QPushButton("Browse…")
         broadcastvoice_dir_button.clicked.connect(
             lambda:self._browse_directory(self.broadcastvoice_dir,"Select BroadcastVoice directory")
         )
-        broadcastvoice_status_button=QPushButton("Browse…")
-        broadcastvoice_status_button.clicked.connect(
-            lambda:self._browse_file(
-                self.broadcastvoice_status,
-                "Select BroadcastVoice status file",
-                "JSON files (*.json);;All files (*.*)",
-            )
-        )
         broadcastvoice_dir_row=QHBoxLayout(); broadcastvoice_dir_row.addWidget(self.broadcastvoice_dir,1); broadcastvoice_dir_row.addWidget(broadcastvoice_dir_button)
-        broadcastvoice_status_row=QHBoxLayout(); broadcastvoice_status_row.addWidget(self.broadcastvoice_status,1); broadcastvoice_status_row.addWidget(broadcastvoice_status_button)
         broadcastvoice_form.addRow("BroadcastVoice directory",broadcastvoice_dir_row)
-        broadcastvoice_form.addRow("BroadcastVoice status file",broadcastvoice_status_row)
         outer.addWidget(broadcastvoice_group)
 
         info=QLabel(
             "These integration paths belong to this local station only. Select the RadioBOSS "
-            "Scheduler SDL file and the local BroadcastVoice folder/status file. Leave an integration empty when unused."
+            "Scheduler SDL file and the local BroadcastVoice folder. Leave an integration empty when unused."
         )
         info.setWordWrap(True); info.setObjectName("muted")
         outer.addWidget(info)
@@ -258,7 +247,6 @@ class SettingsDialog(QDialog):
         self.station_password.setText(str(s.get("radioboss_password") or ""))
         self.station_accent.setText(str(s.get("accent_color") or "#27ff72"))
         self.scheduler_sdl.setText(str(s.get("scheduler_admin_sdl") or ""))
-        self.broadcastvoice_status.setText(str(s.get("broadcastvoice_status_file") or ""))
         self.broadcastvoice_dir.setText(str(s.get("broadcastvoice_dir") or ""))
 
     def _store_station(self,index=0):
@@ -266,6 +254,9 @@ class SettingsDialog(QDialog):
         if not stations:
             stations.append(copy.deepcopy(backend.DEFAULT_STATION))
         s=stations[0]
+        # v1.0.11 uses the BroadcastVoice directory as the single source of
+        # truth. Remove the misleading legacy status-file setting on save.
+        s.pop("broadcastvoice_status_file",None)
         s.update({
             "name":self.station_name.text().strip() or "My Radio Station",
             "short_name":self.station_short.text().strip() or "STATION",
@@ -276,7 +267,6 @@ class SettingsDialog(QDialog):
             "accent_color":self.station_accent.text().strip() or "#27ff72",
             "scheduler_events_file":"",
             "scheduler_admin_sdl":self.scheduler_sdl.text().strip(),
-            "broadcastvoice_status_file":self.broadcastvoice_status.text().strip(),
             "broadcastvoice_dir":self.broadcastvoice_dir.text().strip(),
         })
         self.document["stations"]=[s]

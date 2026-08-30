@@ -66,7 +66,6 @@ DEFAULT_STATION = {
   "accent_color": "#27ff72",
   "scheduler_events_file": "",
   "scheduler_admin_sdl": "",
-  "broadcastvoice_status_file": "",
   "broadcastvoice_dir": ""
 }
 
@@ -97,7 +96,6 @@ RUNTIME_DEFAULT = {
   "monitor_port": 8765,
   "scheduler_events_file": "",
   "scheduler_admin_sdl": "",
-  "broadcastvoice_status_file": "",
   "broadcastvoice_dir": "",
   "weather_enabled": False,
   "weather_location": "",
@@ -129,6 +127,10 @@ def _normalise_station(profile, index=0):
     else:
         # Supports the earlier flat/plain configuration during one migration.
         result["radioboss_password"]=str(result.get("radioboss_password") or "")
+    # v1.0.10 exposed runtime/state.json as a status file even though that file
+    # is only BroadcastVoice's internal counter state. Directory discovery now
+    # reads every required runtime/config source itself.
+    result.pop("broadcastvoice_status_file",None)
     return result
 
 
@@ -993,16 +995,6 @@ def _find_broadcastvoice_dir(cfg):
 
 def bv_state(cfg):
     """Read BroadcastVoice state/config only. Never sends commands."""
-    explicit_status=str(cfg.get("broadcastvoice_status_file","") or "").strip()
-    if explicit_status and Path(explicit_status).is_file():
-        try:
-            d=json.loads(Path(explicit_status).read_text(encoding="utf-8-sig"))
-            if isinstance(d,dict):
-                d.setdefault("connected",True)
-                return d
-        except Exception:
-            pass
-
     root=_find_broadcastvoice_dir(cfg)
     if root is None:
         return {
@@ -1470,7 +1462,7 @@ def main():
         name="Browser-Heartbeat-Watchdog",
     ).start()
     print("="*68)
-    print("RadioBOSS Studio Monitor v1.0.10")
+    print("RadioBOSS Studio Monitor v1.0.11")
     print("="*68)
     print("Studio Monitor:",url)
     print(f'RadioBOSS API : {cfg["radioboss_host"]}:{cfg["radioboss_port"]}')
