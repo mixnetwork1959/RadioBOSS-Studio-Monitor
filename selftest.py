@@ -66,7 +66,7 @@ def main():
             document=backend.load_public_config()
             check(not document.get("configured"),"new configuration must start unconfigured")
             check(document.get("theme")=="dark","new configuration must use the dark theme")
-            station=document["stations"][0]
+            station=document["station"]
             station.update({
                 "name":"Test Station",
                 "radioboss_host":"127.0.0.1",
@@ -85,10 +85,10 @@ def main():
 
             loaded=backend.load_public_config()
             check(loaded.get("theme")=="light","theme selection did not survive configuration save")
-            check(loaded["stations"][0]["radioboss_password"]=="test-secret","password roundtrip failed")
-            check(len(loaded["stations"])==1,"single-station edition must retain exactly one station")
-            check(loaded["stations"][0]["broadcastvoice_dir"]==r"D:\BroadcastVoice-Main","local BroadcastVoice path was not retained")
-            cfg=backend.load_config(loaded["stations"][0]["id"])
+            check(loaded["station"]["radioboss_password"]=="test-secret","password roundtrip failed")
+            check("stations" not in loaded and "active_station" not in loaded,"legacy multi-station fields survived migration")
+            check(loaded["station"]["broadcastvoice_dir"]==r"D:\BroadcastVoice-Main","local BroadcastVoice path was not retained")
+            cfg=backend.load_config()
             state=backend.rb_state(cfg)
             check(state.get("connected"),state.get("error") or "mock RadioBOSS did not connect")
             check(state["current"]["title"]=="Current Song","current title parse failed")
@@ -98,6 +98,10 @@ def main():
             check(playlist.get("ok"),playlist.get("error") or "playlist parse failed")
             check(any(x.get("status")=="PLAYING" for x in playlist.get("tracks") or []),"playing row not detected")
             check(backend.weather_state(cfg).get("disabled"),"weather-disabled mode failed")
+
+            loaded["station"]["radioboss_password"]="changed-secret"
+            backend.save_public_config(loaded)
+            check(backend.load_public_config()["station"]["radioboss_password"]=="changed-secret","edited password was replaced by the previous protected value")
 
             # A legacy runtime/state.json path must not bypass the complete
             # directory-based BroadcastVoice status calculation.
@@ -114,6 +118,23 @@ def main():
                 "broadcastvoice_status_file":str(legacy_state),
             })
             check(bv.get("announcer")=="RIGHT-CONFIG","legacy BroadcastVoice status file bypassed directory discovery")
+
+            # v1.0.12 must import only the first profile from an older
+            # two-station config and immediately expose the new singular form.
+            backend.CONFIG.write_text(json.dumps({
+                "configured":True,
+                "active_station":"station-2",
+                "stations":[
+                    {"id":"station-1","short_name":"MAIN","name":"Legacy Main","radioboss_host":"127.0.0.1","radioboss_port":9000},
+                    {"id":"station-2","short_name":"ROCK","name":"Legacy Rock","radioboss_host":"127.0.0.1","radioboss_port":9010},
+                ],
+            }),encoding="utf-8")
+            migrated=backend.load_public_config()
+            check(migrated["station"]["name"]=="Legacy Main","first legacy station was not migrated")
+            check("stations" not in migrated and "active_station" not in migrated,"old station selector survived migration")
+            check("id" not in migrated["station"] and "short_name" not in migrated["station"],"old station selector metadata survived migration")
+            migrated_json=backend.CONFIG.read_text(encoding="utf-8")
+            check('"stations"' not in migrated_json and '"active_station"' not in migrated_json,"old station selector remained in the saved JSON")
     finally:
         backend.CONFIG=original_config
         server.shutdown(); server.server_close()
@@ -123,7 +144,7 @@ def main():
     print("- first-run configuration")
     print("- protected credential storage")
     print("- light/dark theme configuration")
-    print("- single local station and integration paths")
+    print("- single local station configuration and legacy migration")
     print("- RadioBOSS playback XML")
     print("- RadioBOSS playlist XML")
     print("- weather-disabled mode")

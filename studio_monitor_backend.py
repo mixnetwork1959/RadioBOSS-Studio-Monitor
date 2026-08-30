@@ -53,12 +53,10 @@ def browser_last_seen():
 
 HTML = BASE / "studio-monitor.html"
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 DEFAULT_STATION = {
-  "id": "station-1",
   "name": "My Radio Station",
-  "short_name": "STATION 1",
   "radioboss_host": "127.0.0.1",
   "radioboss_port": 9000,
   "radioboss_user": "",
@@ -74,8 +72,7 @@ DEFAULT_DOCUMENT = {
   "configured": False,
   "application_title": "RadioBOSS Studio Monitor",
   "theme": "dark",
-  "active_station": "station-1",
-  "stations": [DEFAULT_STATION],
+  "station": DEFAULT_STATION,
   "refresh_interval_ms": 1500,
   "start_maximized": True,
   "playlist_rows": 16,
@@ -109,13 +106,13 @@ def _new_document():
     return copy.deepcopy(DEFAULT_DOCUMENT)
 
 
-def _normalise_station(profile, index=0):
+def _normalise_station(profile):
     result=copy.deepcopy(DEFAULT_STATION)
     if isinstance(profile,dict):
         result.update(profile)
-    result["id"]=str(result.get("id") or f"station-{index+1}").strip()
-    result["name"]=str(result.get("name") or f"Station {index+1}").strip()
-    result["short_name"]=str(result.get("short_name") or result["name"]).strip()[:20]
+    result.pop("id",None)
+    result.pop("short_name",None)
+    result["name"]=str(result.get("name") or "My Radio Station").strip()
     result["radioboss_host"]=str(result.get("radioboss_host") or "127.0.0.1").strip()
     try:
         result["radioboss_port"]=int(result.get("radioboss_port") or 9000)
@@ -134,120 +131,105 @@ def _normalise_station(profile, index=0):
     return result
 
 
-def _legacy_document(data):
-    """Convert the earlier single-station JSON shape without copying branding."""
+def _document_from_data(data):
+    """Return the single-station document and migrate older config shapes."""
     doc=_new_document()
-    station=copy.deepcopy(DEFAULT_STATION)
-    for key in station:
-        if key in data:
-            station[key]=data[key]
-    station["name"]=str(data.get("station_name") or "My Radio Station")
-    station["short_name"]=str(data.get("station_short_name") or "STATION 1")
-    doc["stations"]=[station]
-    for key in doc:
-        if key in data and key not in ("stations",):
+    if not isinstance(data,dict):
+        data={}
+    for key in DEFAULT_DOCUMENT:
+        if key != "station" and key in data:
             doc[key]=data[key]
-    doc["configured"]=bool(str(station.get("radioboss_password") or "").strip())
+
+    station_source=data.get("station")
+    if not isinstance(station_source,dict):
+        # v1.0.1-v1.0.11 stored one or more profiles in a stations list.
+        old_profiles=data.get("stations")
+        if isinstance(old_profiles,list) and old_profiles and isinstance(old_profiles[0],dict):
+            station_source=old_profiles[0]
+        else:
+            # Earliest builds used a flat document.
+            station_source={key:data[key] for key in DEFAULT_STATION if key in data}
+            if data.get("station_name"):
+                station_source["name"]=data.get("station_name")
+
+    doc["station"]=_normalise_station(station_source)
+    if "configured" not in data:
+        station=doc["station"]
+        doc["configured"]=bool(
+            str(station.get("radioboss_password") or "").strip()
+            or str(station.get("radioboss_password_protected") or "").strip()
+        )
     return doc
 
 
 def load_public_config():
-    doc=_new_document()
     try:
         raw=CONFIG.read_text(encoding="utf-8-sig")
         data=json.loads(raw)
         if not isinstance(data,dict):
             raise ValueError("Configuration must be a JSON object")
-        if not isinstance(data.get("stations"),list):
-            data=_legacy_document(data)
-        doc.update(data)
-        stations=[]
-        used_ids=set()
-        for index,profile in enumerate(doc.get("stations") or []):
-            item=_normalise_station(profile,index)
-            base_id=item["id"]
-            suffix=2
-            while item["id"] in used_ids:
-                item["id"]=f"{base_id}-{suffix}"; suffix+=1
-            used_ids.add(item["id"])
-            stations.append(item)
-        if not stations:
-            stations=[_normalise_station(DEFAULT_STATION,0)]
-        # Single-station edition: one installation controls one local RadioBOSS station.
-        stations=stations[:1]
-        used_ids={stations[0]["id"]}
-        doc["stations"]=stations
-        if str(doc.get("active_station") or "") not in used_ids:
-            doc["active_station"]=stations[0]["id"]
+        migration_needed=(
+            int(data.get("config_version") or 0) != CONFIG_VERSION
+            or not isinstance(data.get("station"),dict)
+            or "stations" in data
+            or "active_station" in data
+        )
+        doc=_document_from_data(data)
+        if migration_needed:
+            # Persist the one-time conversion immediately so the obsolete
+            # second profile and selector metadata disappear from disk too.
+            save_public_config(doc)
         doc["_config_error"]=""
     except FileNotFoundError:
+        doc=_new_document()
         doc["_config_error"]=""
     except Exception as e:
+        doc=_new_document()
         doc["_config_error"]=f"Configuration error: {type(e).__name__}: {e}"
     return doc
 
 
 def save_public_config(document):
     """Atomically save the public configuration with protected passwords."""
-    doc=copy.deepcopy(document if isinstance(document,dict) else {})
+    editable=copy.deepcopy(document if isinstance(document,dict) else {})
+    raw_station=editable.get("station") if isinstance(editable.get("station"),dict) else {}
+    supplied_secret=(
+        str(raw_station.get("radioboss_password") or "")
+        if "radioboss_password" in raw_station else None
+    )
+    doc=_document_from_data(editable)
     doc.pop("_config_error",None)
+    doc.pop("stations",None)
+    doc.pop("active_station",None)
     doc["config_version"]=CONFIG_VERSION
-    stations=[]
-    for index,raw in enumerate((doc.get("stations") or [])[:1]):
-        supplied_secret=(
-            str(raw.get("radioboss_password") or "")
-            if isinstance(raw,dict) and "radioboss_password" in raw else None
-        )
-        profile=_normalise_station(raw,index)
-        secret=supplied_secret if supplied_secret is not None else str(profile.get("radioboss_password") or "")
-        profile.pop("radioboss_password",None)
-        profile["radioboss_password_protected"]=protect_secret(secret)
-        stations.append(profile)
-    if not stations:
-        stations=[_normalise_station(DEFAULT_STATION,0)]
-        stations[0]["radioboss_password_protected"]=""
-        stations[0].pop("radioboss_password",None)
-    doc["stations"]=stations
-    valid={str(x.get("id")) for x in stations}
-    if str(doc.get("active_station") or "") not in valid:
-        doc["active_station"]=stations[0]["id"]
+    profile=_normalise_station(doc.get("station"))
+    secret=supplied_secret if supplied_secret is not None else str(profile.get("radioboss_password") or "")
+    profile.pop("radioboss_password",None)
+    profile["radioboss_password_protected"]=protect_secret(secret)
+    doc["station"]=profile
     CONFIG.parent.mkdir(parents=True,exist_ok=True)
     temp=CONFIG.with_suffix(".json.tmp")
     temp.write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding="utf-8")
     temp.replace(CONFIG)
 
 
-def set_active_station(station_id):
-    doc=load_public_config()
-    if any(str(x.get("id"))==str(station_id) for x in doc.get("stations") or []):
-        doc["active_station"]=str(station_id)
-        save_public_config(doc)
-
-
-def runtime_config_from_document(document,station_id=None):
+def runtime_config_from_document(document):
     """Build a flat runtime configuration from an editable config document."""
-    doc=copy.deepcopy(document if isinstance(document,dict) else _new_document())
-    wanted=str(station_id or doc.get("active_station") or "")
-    station=next(
-        (x for x in doc.get("stations") or [] if str(x.get("id"))==wanted),
-        (doc.get("stations") or [DEFAULT_STATION])[0],
-    )
+    doc=_document_from_data(copy.deepcopy(document if isinstance(document,dict) else _new_document()))
+    station=_normalise_station(doc.get("station"))
     cfg=copy.deepcopy(RUNTIME_DEFAULT)
     for key,value in doc.items():
-        if key not in ("stations",):
+        if key != "station":
             cfg[key]=value
     cfg.update(station)
-    cfg["_station_id"]=str(station.get("id") or "station-1")
     cfg["_station_name"]=str(station.get("name") or "My Radio Station")
-    cfg["_station_short_name"]=str(station.get("short_name") or "STATION")
-    cfg["_stations"]=copy.deepcopy(doc.get("stations") or [])
     cfg["_config_error"]=str(doc.get("_config_error") or "")
     return cfg
 
 
-def load_config(station_id=None):
+def load_config():
     """Return the flat runtime view expected by the existing monitor services."""
-    return runtime_config_from_document(load_public_config(),station_id)
+    return runtime_config_from_document(load_public_config())
 
 def rb_url(cfg, action):
     # RadioBOSS supports both authentication forms:
@@ -1462,7 +1444,7 @@ def main():
         name="Browser-Heartbeat-Watchdog",
     ).start()
     print("="*68)
-    print("RadioBOSS Studio Monitor v1.0.11")
+    print("RadioBOSS Studio Monitor v1.0.12")
     print("="*68)
     print("Studio Monitor:",url)
     print(f'RadioBOSS API : {cfg["radioboss_host"]}:{cfg["radioboss_port"]}')

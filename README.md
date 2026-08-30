@@ -1,4 +1,4 @@
-# RadioBOSS Studio Monitor v1.0.11
+# RadioBOSS Studio Monitor v1.0.12
 
 RadioBOSS Studio Monitor is a portable Windows dashboard for one local RadioBOSS installation. It displays the current and next track, remaining time, artwork, current-hour playlist, studio clock, optional weather, optional RadioBOSS Scheduler information, optional BroadcastVoice status and Windows output-level meters.
 
@@ -63,10 +63,18 @@ BUILD-EXE.bat
 The script installs the required packages, runs the self-test, builds the portable EXE and creates:
 
 ```text
-RadioBOSS-Studio-Monitor-v1.0.11-Windows.zip
+RadioBOSS-Studio-Monitor-v1.0.12-Windows.zip
 ```
 
 The generated public ZIP contains only the EXE, README and notice. It deliberately excludes configuration and log files.
+
+### Changes in v1.0.12
+
+- fixed RadioBOSS Scheduler and BroadcastVoice group titles being crossed or partially hidden by their top borders
+- added proper title spacing and an opaque title background in both dark and light themes
+- removed the remaining old two-station configuration model, active-station selector and button-label metadata
+- the configuration now contains one singular local `station` object
+- existing older configurations automatically retain the first local station and discard obsolete second-station selector data
 
 ### Changes in v1.0.11
 

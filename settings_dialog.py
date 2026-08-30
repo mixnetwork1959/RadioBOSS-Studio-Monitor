@@ -13,12 +13,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -62,7 +60,6 @@ class SettingsDialog(QDialog):
         self.document=copy.deepcopy(document)
         self.first_run=bool(first_run)
         self.saved=False
-        self.current_station=0
         self.setWindowTitle("Studio Monitor Setup" if first_run else "Studio Monitor Settings")
         self.resize(820,610)
         self.setMinimumSize(720,540)
@@ -122,7 +119,6 @@ class SettingsDialog(QDialog):
     def _build_station_tab(self):
         tab=QWidget(); form=QFormLayout(tab)
         self.station_name=QLineEdit()
-        self.station_short=QLineEdit(); self.station_short.setMaxLength(20)
         self.station_host=QLineEdit()
         self.station_port=QSpinBox(); self.station_port.setRange(1,65535)
         self.station_user=QLineEdit()
@@ -133,10 +129,9 @@ class SettingsDialog(QDialog):
         color=QPushButton("Choose…"); color.clicked.connect(self._choose_color)
         color_row=QHBoxLayout(); color_row.addWidget(self.station_accent); color_row.addWidget(color)
         test=QPushButton("Test RadioBOSS connection"); test.clicked.connect(self._test_connection)
-        info=QLabel("This Studio Monitor installation controls one local station. Install Studio Monitor on the other RadioBOSS computer for a second station.")
+        info=QLabel("Enter the local RadioBOSS connection used by this Studio Monitor installation.")
         info.setWordWrap(True); info.setObjectName("muted")
         form.addRow("Station name",self.station_name)
-        form.addRow("Button label",self.station_short)
         form.addRow("RadioBOSS host",self.station_host)
         form.addRow("RadioBOSS API port",self.station_port)
         form.addRow("API user (optional)",self.station_user)
@@ -232,15 +227,13 @@ class SettingsDialog(QDialog):
         self.weather_lon.setText(_coordinate_text(d.get("weather_longitude") or 0))
         self.weather_sea.setChecked(bool(d.get("weather_show_sea_temperature",False)))
 
-        stations=d.get("stations") or [copy.deepcopy(backend.DEFAULT_STATION)]
-        # Single-station edition: keep only the first/local station profile.
-        self.document["stations"]=[copy.deepcopy(stations[0])]
-        self.document["active_station"]=str(self.document["stations"][0].get("id") or "station-1")
-        self._load_station_fields(self.document["stations"][0])
+        self.document.pop("stations",None)
+        self.document.pop("active_station",None)
+        self.document["station"]=copy.deepcopy(d.get("station") or backend.DEFAULT_STATION)
+        self._load_station_fields(self.document["station"])
 
     def _load_station_fields(self,s):
         self.station_name.setText(str(s.get("name") or "My Radio Station"))
-        self.station_short.setText(str(s.get("short_name") or "STATION"))
         self.station_host.setText(str(s.get("radioboss_host") or "127.0.0.1"))
         self.station_port.setValue(int(s.get("radioboss_port") or 9000))
         self.station_user.setText(str(s.get("radioboss_user") or ""))
@@ -249,17 +242,15 @@ class SettingsDialog(QDialog):
         self.scheduler_sdl.setText(str(s.get("scheduler_admin_sdl") or ""))
         self.broadcastvoice_dir.setText(str(s.get("broadcastvoice_dir") or ""))
 
-    def _store_station(self,index=0):
-        stations=self.document.setdefault("stations",[])
-        if not stations:
-            stations.append(copy.deepcopy(backend.DEFAULT_STATION))
-        s=stations[0]
+    def _store_station(self):
+        s=copy.deepcopy(self.document.get("station") or backend.DEFAULT_STATION)
+        s.pop("id",None)
+        s.pop("short_name",None)
         # v1.0.11 uses the BroadcastVoice directory as the single source of
         # truth. Remove the misleading legacy status-file setting on save.
         s.pop("broadcastvoice_status_file",None)
         s.update({
             "name":self.station_name.text().strip() or "My Radio Station",
-            "short_name":self.station_short.text().strip() or "STATION",
             "radioboss_host":self.station_host.text().strip() or "127.0.0.1",
             "radioboss_port":self.station_port.value(),
             "radioboss_user":self.station_user.text().strip(),
@@ -269,19 +260,19 @@ class SettingsDialog(QDialog):
             "scheduler_admin_sdl":self.scheduler_sdl.text().strip(),
             "broadcastvoice_dir":self.broadcastvoice_dir.text().strip(),
         })
-        self.document["stations"]=[s]
-        self.document["active_station"]=str(s.get("id") or "station-1")
+        self.document.pop("stations",None)
+        self.document.pop("active_station",None)
+        self.document["station"]=s
 
     def _choose_color(self):
         colour=QColorDialog.getColor(parent=self)
         if colour.isValid(): self.station_accent.setText(colour.name())
 
     def _test_connection(self):
-        self._store_station(self.current_station)
-        station=(self.document.get("stations") or [{}])[0]
+        self._store_station()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            cfg=backend.runtime_config_from_document(self.document,station.get("id"))
+            cfg=backend.runtime_config_from_document(self.document)
             result=backend.rb_state(cfg)
         finally:
             QApplication.restoreOverrideCursor()
@@ -293,16 +284,13 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self,"RadioBOSS connection",str(result.get("error") or "Connection failed."))
 
     def _accept(self):
-        self._store_station(self.current_station)
-        stations=self.document.get("stations") or []
-        if not stations:
-            QMessageBox.warning(self,"Settings","A station configuration is required."); return
-        for station in stations:
-            if not str(station.get("name") or "").strip() or not str(station.get("radioboss_host") or "").strip():
-                QMessageBox.warning(self,"Settings","The station needs a name and RadioBOSS host."); return
-            colour=str(station.get("accent_color") or "")
-            if not re.fullmatch(r"#[0-9a-fA-F]{6}",colour):
-                QMessageBox.warning(self,"Settings",f"Invalid accent colour for {station.get('name')}: {colour}"); return
+        self._store_station()
+        station=self.document.get("station") or {}
+        if not str(station.get("name") or "").strip() or not str(station.get("radioboss_host") or "").strip():
+            QMessageBox.warning(self,"Settings","A station name and RadioBOSS host are required."); return
+        colour=str(station.get("accent_color") or "")
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}",colour):
+            QMessageBox.warning(self,"Settings",f"Invalid accent colour: {colour}"); return
 
         try:
             weather_required=self.weather_enabled.isChecked()
@@ -327,8 +315,6 @@ class SettingsDialog(QDialog):
             "weather_longitude":weather_longitude,
             "weather_show_sea_temperature":self.weather_sea.isChecked(),
         })
-        if str(self.document.get("active_station") or "") not in {str(x.get("id")) for x in stations}:
-            self.document["active_station"]=str(stations[0].get("id"))
         try:
             backend.save_public_config(self.document)
         except Exception as exc:

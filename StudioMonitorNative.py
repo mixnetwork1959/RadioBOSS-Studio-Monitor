@@ -1186,8 +1186,7 @@ class StudioMonitor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config_doc=backend.load_public_config()
-        self.active_station=str(self.config_doc.get("active_station") or "station-1")
-        self._station_generation=0
+        self._config_generation=0
         self._request_serial=0
         self._request_started=0.0
         self._weather_busy=False
@@ -1203,7 +1202,7 @@ class StudioMonitor(QMainWindow):
             "current":{"key":"","data":b"","attempt":0.0},
             "next":{"key":"","data":b"","attempt":0.0},
         }
-        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.11")
+        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.12")
         self.resize(1680, 940)
         self.setMinimumSize(900, 620)
 
@@ -1246,10 +1245,8 @@ class StudioMonitor(QMainWindow):
         self._set_silence_indicator("standby")
         grid.addWidget(self.onair,0,0)
 
-        self.brand_panel=Panel("RADIO STATION")
-        self.station_row=QHBoxLayout()
-        self.station_row.setSpacing(6)
-        self.brand_panel.layout.addLayout(self.station_row)
+        station=self.config_doc.get("station") or {}
+        self.brand_panel=Panel(str(station.get("name") or "RADIO STATION").upper())
         vu_top=QHBoxLayout()
         vu_top.setSpacing(10)
         self.vu_left=AnalogVUMeter("L")
@@ -1553,7 +1550,6 @@ class StudioMonitor(QMainWindow):
             threading.Thread(target=backend._audio_meter_worker,daemon=True,name="NativeAudioMeter").start()
         else:
             backend._audio_set(available=False,left=0.0,right=0.0,error="Audio meter disabled in Settings")
-        self.rebuild_station_buttons()
         self.request_state()
         self.request_weather()
 
@@ -1563,35 +1559,9 @@ class StudioMonitor(QMainWindow):
         self.analog_clock.update()
         self.hour_countdown.update()
 
-    def rebuild_station_buttons(self):
-        while self.station_row.count():
-            item=self.station_row.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
-        stations=self.config_doc.get("stations") or []
-        station=stations[0] if stations else {}
-        self.active_station=str(station.get("id") or "station-1")
+    def apply_station_name(self):
+        station=self.config_doc.get("station") or {}
         self.brand_panel.set_title(str(station.get("name") or "RADIO STATION").upper())
-        label=QLabel(str(station.get("short_name") or "LOCAL STATION"))
-        label.setObjectName("green")
-        self.station_row.addWidget(label)
-        self.station_row.addStretch()
-
-    def switch_station(self,station_id):
-        if not station_id or station_id==self.active_station:return
-        if not any(str(x.get("id"))==station_id for x in self.config_doc.get("stations") or []):return
-        self.active_station=station_id
-        self.config_doc["active_station"]=station_id
-        self._station_generation+=1
-        self.busy=False
-        self._weather_busy=False
-        self._reset_artwork_cache()
-        try: backend.save_public_config(self.config_doc)
-        except Exception: pass
-        self.rebuild_station_buttons()
-        self.api_error.setText("")
-        self.conn.setText("● CONNECTING")
-        self.request_state()
-        self.request_weather()
 
     def _reset_artwork_cache(self):
         with self._art_cache_lock:
@@ -1600,10 +1570,10 @@ class StudioMonitor(QMainWindow):
         self._current_art_signature=object()
         self._next_art_signature=object()
 
-    def _cached_artwork(self,cfg,station_id,slot,track):
+    def _cached_artwork(self,cfg,slot,track):
         fields=("artist","title","filename")
         track_key="\x1f".join(str((track or {}).get(name) or "").strip() for name in fields)
-        key=f"{station_id}\x1f{track_key}" if track_key.strip("\x1f") else ""
+        key=track_key if track_key.strip("\x1f") else ""
         if not key:
             return b""
 
@@ -1630,11 +1600,10 @@ class StudioMonitor(QMainWindow):
         self._request_started=time.monotonic()
         self._request_serial+=1
         serial=self._request_serial
-        generation=self._station_generation
-        station_id=self.active_station
+        generation=self._config_generation
         def job():
             try:
-                cfg=backend.load_config(station_id)
+                cfg=backend.load_config()
                 d=backend.rb_state(cfg)
                 d["scheduler"]=backend.scheduler_state(cfg)
                 d["broadcastvoice"]=backend.bv_state(cfg)
@@ -1643,12 +1612,11 @@ class StudioMonitor(QMainWindow):
 
                 if d.get("connected"):
                     d["_art_current_bytes"]=self._cached_artwork(
-                        cfg,station_id,"current",d.get("current") or {}
+                        cfg,"current",d.get("current") or {}
                     )
                     d["_art_next_bytes"]=self._cached_artwork(
-                        cfg,station_id,"next",d.get("next") or {}
+                        cfg,"next",d.get("next") or {}
                     )
-                d["_station_id"]=station_id
                 d["_generation"]=generation
                 d["_serial"]=serial
                 self.signals.state.emit(d)
@@ -1663,11 +1631,10 @@ class StudioMonitor(QMainWindow):
         if self._weather_busy:return
         self._weather_busy=True
         self._weather_started=time.monotonic()
-        generation=self._station_generation
-        station_id=self.active_station
+        generation=self._config_generation
         def job():
             try:
-                data=backend.weather_state(backend.load_config(station_id))
+                data=backend.weather_state(backend.load_config())
                 data["_generation"]=generation
                 self.signals.weather.emit(data)
             except Exception as exc:
@@ -1718,27 +1685,25 @@ class StudioMonitor(QMainWindow):
         dialog=SettingsDialog(backend.load_public_config(),self)
         dialog.exec()
         if dialog.saved:
-            old_active=self.active_station
             self.config_doc=backend.load_public_config()
             app=QApplication.instance()
             if app is not None:
                 apply_theme(app,self.config_doc.get("theme","dark"))
-            self.active_station=str(self.config_doc.get("active_station") or old_active)
-            self._station_generation+=1
+            self._config_generation+=1
             self.timer.setInterval(max(750,int(self.config_doc.get("refresh_interval_ms") or 1500)))
             self._playlist_signature=None
             self._reset_artwork_cache()
-            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.11")
-            self.rebuild_station_buttons()
+            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.12")
+            self.apply_station_name()
             self.busy=False; self._weather_busy=False
             self.request_state(); self.request_weather()
             if old_audio!=bool(self.config_doc.get("audio_meter_enabled",True)):
                 QMessageBox.information(self,"Audio Meter","Restart Studio Monitor to apply the audio-meter change.")
 
     def run_diagnose(self):
-        cfg=backend.load_config(self.active_station)
+        cfg=backend.load_config()
         details=[
-            "Studio Monitor v1.0.11",
+            "Studio Monitor v1.0.12",
             f"Configuration: {backend.CONFIG}",
             f"Station: {cfg.get('_station_name') or '—'}",
             f"RadioBOSS: {cfg.get('radioboss_host')}:{cfg.get('radioboss_port')}",
@@ -1751,7 +1716,7 @@ class StudioMonitor(QMainWindow):
         QMessageBox.information(self,"Studio Monitor Diagnostics","\n".join(details))
 
     def run_api_test(self):
-        result=backend.rb_state(backend.load_config(self.active_station))
+        result=backend.rb_state(backend.load_config())
         if result.get("connected"):
             current=result.get("current") or {}
             title=" - ".join(x for x in (current.get("artist"),current.get("title")) if x)
@@ -1802,8 +1767,7 @@ class StudioMonitor(QMainWindow):
         self._set_art(label,data)
 
     def apply_state(self,d):
-        if int(d.get("_generation",-1))!=self._station_generation:return
-        if str(d.get("_station_id") or "")!=self.active_station:return
+        if int(d.get("_generation",-1))!=self._config_generation:return
         self.last_update.setText("LAST UPDATE "+time.strftime("%H:%M:%S"))
         online=bool(d.get("connected"))
         play=online and (d.get("playback") or {}).get("state")=="play"
@@ -1975,7 +1939,7 @@ class StudioMonitor(QMainWindow):
                 self.table.viewport().update()
 
     def apply_weather(self,w):
-        if int(w.get("_generation",-1))!=self._station_generation:return
+        if int(w.get("_generation",-1))!=self._config_generation:return
         self.weather_visual.set_weather(w)
         if w.get("ok"):
             self.weather.setText(str(w.get("location") or "Weather"))
@@ -2120,7 +2084,9 @@ def stylesheet(theme="dark"):
     QPushButton[stationActive="true"] {{ background:{c['station_active_bg']}; color:{c['green']}; border:2px solid {c['green']}; }}
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QListWidget {{ background:{c['input_bg']}; color:{c['text']}; border:1px solid {c['input_border']}; border-radius:5px; padding:5px; }}
     QComboBox QAbstractItemView {{ background:{c['input_bg']}; color:{c['text']}; selection-background-color:{c['button_hover']}; }}
-    QTabWidget::pane, QGroupBox {{ border:1px solid {c['input_border']}; border-radius:6px; margin-top:7px; }}
+    QTabWidget::pane {{ border:1px solid {c['input_border']}; border-radius:6px; }}
+    QGroupBox {{ border:1px solid {c['input_border']}; border-radius:6px; margin-top:14px; padding-top:5px; }}
+    QGroupBox::title {{ subcontrol-origin:margin; subcontrol-position:top left; left:10px; padding:0 5px; color:{c['text']}; background:{c['bg']}; }}
     QTabBar::tab {{ background:{c['tab_bg']}; color:{c['tab_text']}; padding:7px 13px; }}
     QTabBar::tab:selected {{ color:{c['cyan']}; border-bottom:2px solid {c['cyan']}; }}
     QProgressBar {{ background:{c['progress_bg']}; border:1px solid {c['soft_border']}; border-radius:5px; height:12px; }}
