@@ -253,7 +253,9 @@ def rb_url_params(cfg, action, **params):
 
 def fetch_bytes(url, timeout=1.5):
     req=urllib.request.Request(url,headers={"User-Agent":"RadioBOSSStudioMonitor/1.0"})
-    with urllib.request.urlopen(req,timeout=timeout) as r:
+    # Do not share the process-global opener between polling, artwork and API tests.
+    opener=urllib.request.build_opener()
+    with opener.open(req,timeout=timeout) as r:
         return r.read()
 
 def track(node):
