@@ -1,0 +1,17 @@
+Studio Monitor v1.0.14 – Verbindungsbehandlung
+
+1. Dieses Paket in einen neuen Ordner entpacken.
+2. BUILD-EXE.bat doppelklicken und auf BUILD COMPLETE warten.
+3. Den laufenden Studio Monitor schliessen (RadioBOSS weiterlaufen lassen).
+4. Die neue EXE aus dem Unterordner dist in D:\RadioBOSS-Studio-Monitor kopieren
+   und dort die bisherige EXE ersetzen. Die alte EXE vorher als Sicherung behalten.
+5. studio_monitor_config.json im bisherigen Ordner unveraendert behalten.
+6. Die neue EXE starten. Im Fenstertitel muss v1.0.14 stehen.
+7. Pruefen, dass in Explorer, Fenstertitel und Windows-Taskleiste das neue
+   Studio-Monitor-Symbol angezeigt wird.
+
+Bei veralteten Daten zeigt der Monitor jetzt DATA STALE / RECONNECTING.
+DIAGNOSE nennt den Zeitpunkt der letzten erfolgreichen Aktualisierung und Fehler.
+Das Paket enthaelt Quellcode und Build-Skripte, keine vorgefertigte Windows-EXE.
+Die oeffentliche Windows-Version ist als Freeware vorgesehen und benoetigt
+keine Aktivierung und keinen Lizenzschluessel.

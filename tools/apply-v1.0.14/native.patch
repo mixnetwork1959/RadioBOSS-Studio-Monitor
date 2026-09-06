@@ -1,0 +1,239 @@
+--- a/StudioMonitorNative.py
++++ b/StudioMonitorNative.py
+@@ -1,10 +1,10 @@
+ from __future__ import annotations
+-import sys, os, math, time, json, threading
++import sys, os, math, time, json, threading, subprocess
+ from pathlib import Path
+ from concurrent.futures import ThreadPoolExecutor
+ 
+ from PySide6.QtCore import Qt, QTimer, Signal, QObject, QRectF, QPointF, QSettings
+-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QPainterPath, QPixmap, QLinearGradient
++from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QPainterPath, QPixmap, QLinearGradient, QIcon
+ from PySide6.QtWidgets import (
+     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
+     QGridLayout, QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
+@@ -23,6 +23,30 @@
+ )
+ backend.CONFIG = BASE / "studio_monitor_config.json"
+ 
++
++def _resource_path(name: str) -> Path:
++    """Return a packaged resource path in source and PyInstaller builds."""
++    bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
++    return bundle / name
++
++
++def _application_icon() -> QIcon:
++    path = _resource_path("studio_monitor.ico")
++    return QIcon(str(path)) if path.exists() else QIcon()
++
++
++def _set_windows_app_id():
++    """Give Windows a stable taskbar identity for correct grouping/icon display."""
++    if os.name != "nt":
++        return
++    try:
++        import ctypes
++        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
++            "RadioBOSSCommunity.StudioMonitor"
++        )
++    except Exception:
++        pass
++
+ THEME_PALETTES = {
+     "dark": {
+         "cyan":"#00d9ff", "green":"#27ff72", "amber":"#ffc22c", "red":"#ff3845",
+@@ -1188,8 +1212,14 @@
+         self._config_generation=0
+         self._request_serial=0
+         self._request_started=0.0
++        self._last_success=0.0
++        self._last_success_text="—"
++        self._last_poll_error=""
++        self._closing=False
+         self._weather_busy=False
+         self._weather_started=0.0
++        self._gui_heartbeat=time.monotonic()
++        self._pool_generation=0
+         self._radioboss_playing=False
+         self._silence_started=None
+         self._silence_indicator_signature=None
+@@ -1201,7 +1231,8 @@
+             "current":{"key":"","data":b"","attempt":0.0},
+             "next":{"key":"","data":b"","attempt":0.0},
+         }
+-        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.12")
++        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.14")
++        self.setWindowIcon(_application_icon())
+         self.resize(1680, 940)
+         self.setMinimumSize(900, 620)
+ 
+@@ -1535,7 +1566,8 @@
+         self.signals.weather.connect(self.apply_weather)
+         self.signals.audio.connect(self.apply_audio)
+         self.signals.error.connect(self.show_error)
+-        self.pool=ThreadPoolExecutor(max_workers=4)
++        self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix="StudioMonitorWorker")
++        threading.Thread(target=self._gui_freeze_watchdog,daemon=True,name="StudioMonitorGUIWatchdog").start()
+         self.busy=False
+ 
+         interval=max(750,int(self.config_doc.get("refresh_interval_ms") or 1500))
+@@ -1553,6 +1585,7 @@
+         self.request_weather()
+ 
+     def tick_clock(self):
++        self._gui_heartbeat=time.monotonic()
+         self.clock.setText(time.strftime("%H:%M:%S"))
+         self.date_label.setText(time.strftime("%A · %d.%m.%Y"))
+         self.analog_clock.update()
+@@ -1620,7 +1653,8 @@
+                 d["_serial"]=serial
+                 self.signals.state.emit(d)
+             except Exception as e:
+-                self.signals.error.emit(repr(e))
++                self.signals.state.emit({"connected":False,"error":type(e).__name__+": "+str(e),
++                    "_generation":generation,"_serial":serial})
+             finally:
+                 if serial==self._request_serial:
+                     self.busy=False
+@@ -1644,14 +1678,46 @@
+ 
+     def watchdog_tick(self):
+         now=time.monotonic()
++        if self._last_success and now-self._last_success>max(15.0,self.timer.interval()/1000.0*3):
++            self.mark_stale("No fresh RadioBOSS data; reconnecting…")
+         if self.busy and self._request_started and now-self._request_started>12:
++            self.mark_stale("Background request timed out; reconnecting…")
+             self._request_serial+=1
+             self.busy=False
+-            self.api_error.setText("RadioBOSS request timed out; retrying…")
++            # A Python worker cannot be killed safely. Rotate the executor so a
++            # blocked network/share access cannot gradually consume all workers.
++            old_pool=self.pool
++            self._pool_generation+=1
++            self.pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix=f"StudioMonitorWorker{self._pool_generation}")
++            try:
++                old_pool.shutdown(wait=False,cancel_futures=True)
++            except Exception:
++                pass
++            self.api_error.setText("RadioBOSS/background request timed out; worker pool recovered…")
+             self.api_error.setVisible(True)
++            self.request_state()
+         if self._weather_busy and self._weather_started and now-self._weather_started>15:
+             self._weather_busy=False
+ 
++    def _gui_freeze_watchdog(self):
++        """Last-resort recovery if the Qt event loop itself stops responding."""
++        while not self._closing:
++            time.sleep(5.0)
++            if self._closing:
++                return
++            if time.monotonic()-self._gui_heartbeat <= 25.0:
++                continue
++            try:
++                log=BASE / "studio_monitor_watchdog.log"
++                with log.open("a",encoding="utf-8") as f:
++                    f.write(time.strftime("%Y-%m-%d %H:%M:%S")+" GUI heartbeat lost; restarting Studio Monitor\n")
++                if getattr(sys,"frozen",False):
++                    subprocess.Popen([sys.executable],cwd=str(BASE))
++                else:
++                    subprocess.Popen([sys.executable,str(Path(__file__).resolve())],cwd=str(BASE))
++            finally:
++                os._exit(75)
++
+     def request_audio(self):
+         try:
+             self.signals.audio.emit(backend.audio_state())
+@@ -1692,7 +1758,7 @@
+             self.timer.setInterval(max(750,int(self.config_doc.get("refresh_interval_ms") or 1500)))
+             self._playlist_signature=None
+             self._reset_artwork_cache()
+-            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.12")
++            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.14")
+             self.apply_station_name()
+             self.busy=False; self._weather_busy=False
+             self.request_state(); self.request_weather()
+@@ -1702,7 +1768,7 @@
+     def run_diagnose(self):
+         cfg=backend.load_config()
+         details=[
+-            "Studio Monitor v1.0.12",
++            "Studio Monitor v1.0.14",
+             f"Configuration: {backend.CONFIG}",
+             f"Station: {cfg.get('_station_name') or '—'}",
+             f"RadioBOSS: {cfg.get('radioboss_host')}:{cfg.get('radioboss_port')}",
+@@ -1711,6 +1777,10 @@
+             f"Theme: {str(cfg.get('theme') or 'dark').upper()}",
+             f"Weather: {'ENABLED' if cfg.get('weather_enabled') else 'DISABLED'}",
+             f"Config error: {cfg.get('_config_error') or 'none'}",
++            f"Last successful update: {self._last_success_text}",
++            f"Data age: {int(time.monotonic()-self._last_success) if self._last_success else 'unknown'} seconds",
++            f"Last polling error: {self._last_poll_error or 'none'}",
++            f"Worker recoveries: {self._pool_generation}",
+         ]
+         QMessageBox.information(self,"Studio Monitor Diagnostics","\n".join(details))
+ 
+@@ -1730,6 +1800,7 @@
+             self._run_helper("Install Audio Meter.bat", "Audio Meter Installation")
+ 
+     def closeEvent(self, event):
++        self._closing=True
+         # Save the current position, including the selected monitor.
+         try:
+             self._window_settings.setValue("window/pos", self.pos())
+@@ -1767,8 +1838,15 @@
+ 
+     def apply_state(self,d):
+         if int(d.get("_generation",-1))!=self._config_generation:return
+-        self.last_update.setText("LAST UPDATE "+time.strftime("%H:%M:%S"))
++        if int(d.get("_serial",-1))!=self._request_serial:return
+         online=bool(d.get("connected"))
++        if not online:
++            self.mark_stale(str(d.get("error") or "RadioBOSS connection failed; retrying…"))
++            return
++        self._last_success=time.monotonic()
++        self._last_success_text=time.strftime("%Y-%m-%d %H:%M:%S")
++        self._last_poll_error=""
++        self.last_update.setText("LAST UPDATE "+self._last_success_text)
+         play=online and (d.get("playback") or {}).get("state")=="play"
+         self._radioboss_playing=bool(play)
+         if not play:
+@@ -2041,6 +2119,25 @@
+             detail.append(str(a.get("error")))
+         self.audio_detail.setText(" · ".join(detail))
+ 
++    def mark_stale(self,msg):
++        self._last_poll_error=msg
++        self._radioboss_playing=False
++        self._silence_started=None
++        self._set_silence_indicator("standby")
++        self.onair_lbl.setText("DATA STALE")
++        self.onair_lbl.setStyleSheet(f"color:{RED}; background:{ALERT_BG}; border:1px solid {RED}; border-radius:9px; font-size:34px; font-weight:800; padding:5px 14px;")
++        self.conn.setText("● RECONNECTING")
++        self.conn.setStyleSheet(f"color:{RED}")
++        self.rb_state.setText("RADIOBOSS\nSTALE")
++        self.rb_state.setStyleSheet(f"color:{RED}")
++        self.system.setText("RADIOBOSS DATA STALE · RETRYING")
++        self.api_error.setText(msg)
++        self.api_error.setVisible(True)
++        self.last_update.setText("LAST SUCCESS "+self._last_success_text+" · STALE")
++        self.turntable.set_playback(False,0,0,"")
++        self.remaining.setText("—")
++        self.next_in.setText("START IN —")
++
+     def show_error(self,msg):
+         self.system.setText("ERROR · "+msg)
+ 
+@@ -2097,7 +2194,11 @@
+     """
+ 
+ def main():
++    _set_windows_app_id()
+     app=QApplication(sys.argv)
++    app.setApplicationName("RadioBOSS Studio Monitor")
++    app.setOrganizationName("RadioBOSSCommunity")
++    app.setWindowIcon(_application_icon())
+     document=backend.load_public_config()
+     apply_theme(app,document.get("theme","dark"))
+     if not bool(document.get("configured",False)):

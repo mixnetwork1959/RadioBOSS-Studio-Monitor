@@ -3,6 +3,10 @@ RadioBOSS Studio Monitor is an independent community project.
 RadioBOSS is a trademark of DJSoft.net. This project is not affiliated with,
 endorsed by, or supported by DJSoft.net.
 
+FREEWARE EDITION
+The RadioBOSS Studio Monitor binary may be downloaded and used free of charge.
+No activation or licence key is required.
+
 The public build contains no station-specific configuration, passwords, station
-logs, or station-specific media. A licence must be selected by the project
-owner before the first external source-code publication.
+logs, or station-specific media. Source-code publication and source-code
+licensing are separate from this free binary distribution.

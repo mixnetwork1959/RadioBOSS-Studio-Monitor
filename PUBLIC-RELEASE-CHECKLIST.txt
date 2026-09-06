@@ -1,7 +1,9 @@
-RADIOBOSS STUDIO MONITOR v1.0.12 - RELEASE CHECKLIST
+RADIOBOSS STUDIO MONITOR v1.0.14 - RELEASE CHECKLIST
 
 [ ] Run RUN-TESTS.bat
 [ ] Run BUILD-EXE.bat on Windows 11
+[ ] Confirm the EXE shows the Studio Monitor icon in Explorer
+[ ] Confirm the running window/taskbar shows the Studio Monitor icon
 [ ] Start the EXE from a writable folder
 [ ] Complete first-run setup with a test RadioBOSS installation
 [ ] Test current/next track, artwork, remaining time and playlist
@@ -10,6 +12,6 @@ RADIOBOSS STUDIO MONITOR v1.0.12 - RELEASE CHECKLIST
 [ ] Test both Dark and Light themes, including Settings and playlist readability
 [ ] Test the resized window and the vertical scrollbar
 [ ] Confirm the release ZIP contains no studio_monitor_config.json or log files
+[ ] Confirm the Freeware notice is included and no activation is requested
 [ ] Scan the final EXE/ZIP with Windows Security
-[ ] Select the source/binary licence before public upload
 [ ] Add release screenshots and version notes

@@ -8,4 +8,5 @@ if %errorlevel%==0 (
   python "%~dp0selftest.py"
 )
 echo.
+py "%~dp0test_connection_recovery.py"
 pause
