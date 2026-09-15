@@ -1,0 +1,1 @@
+This second temporary file will be removed by the final snapshot commit.
