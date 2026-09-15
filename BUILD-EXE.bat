@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================================
-echo RadioBOSS Studio Monitor v1.0.14 - Public Windows Build
+echo RadioBOSS Studio Monitor v1.0.18 - Public Windows Build
 echo ============================================================
 echo.
 
@@ -37,6 +37,9 @@ if errorlevel 1 goto :failed
 %PY_CMD% "%~dp0test_connection_recovery.py"
 if errorlevel 1 goto :failed
 
+%PY_CMD% "%~dp0test_display_modes.py"
+if errorlevel 1 goto :failed
+
 echo.
 echo Cleaning previous build output...
 if exist "%~dp0build" rmdir /s /q "%~dp0build"
@@ -50,9 +53,9 @@ echo Building portable Windows EXE...
   --clean ^
   --onefile ^
   --windowed ^
+  --icon "%~dp0studio_monitor_icon.ico" ^
+  --add-data "%~dp0studio_monitor_icon.png;." ^
   --name "RadioBOSS-Studio-Monitor" ^
-  --icon "%~dp0studio_monitor.ico" ^
-  --add-data "%~dp0studio_monitor.ico;." ^
   --collect-all pycaw ^
   --collect-all comtypes ^
   "%~dp0StudioMonitorNative.py"
@@ -64,7 +67,7 @@ copy /y "%~dp0README.md" "%~dp0release-package\README.md" >nul
 copy /y "%~dp0NOTICE.txt" "%~dp0release-package\NOTICE.txt" >nul
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "Compress-Archive -Path '%~dp0release-package\*' -DestinationPath '%~dp0RadioBOSS-Studio-Monitor-v1.0.14-Windows.zip' -Force"
+  "Compress-Archive -Path '%~dp0release-package\*' -DestinationPath '%~dp0RadioBOSS-Studio-Monitor-v1.0.18-Windows.zip' -Force"
 if errorlevel 1 goto :failed
 
 echo.
@@ -72,7 +75,7 @@ echo ============================================================
 echo BUILD COMPLETE
 echo ============================================================
 echo EXE: %~dp0dist\RadioBOSS-Studio-Monitor.exe
-echo ZIP: %~dp0RadioBOSS-Studio-Monitor-v1.0.14-Windows.zip
+echo ZIP: %~dp0RadioBOSS-Studio-Monitor-v1.0.18-Windows.zip
 echo.
 echo The ZIP contains no configuration, password, or log files.
 pause

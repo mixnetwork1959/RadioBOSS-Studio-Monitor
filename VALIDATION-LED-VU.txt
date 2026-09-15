@@ -1,0 +1,68 @@
+RadioBOSS Studio Monitor v1.0.18 - LED / VU
+Pruefung am 15.09.2026
+
+QUELLSTAND
+RadioBOSS-Studio-Monitor-v1.0.17-APP-ICON-BuildSource.zip vom 08.09.2026.
+Dieser neuere RadioBOSS-Zweig enthaelt Silence Alarm, Top-of-hour-Anzeige,
+Hour Watch, Verbindungs-Recovery und das aktuelle Icon. Der angehaengte
+Radio-Albena-v1.0.25-Zweig ist aelter und enthaelt diese Ausstattung nicht.
+
+KAPSELUNG
+backend.audio_state() -> Signal -> StudioMonitor.apply_audio() -> set_level()
+Der Audio-Worker und apply_audio() sind unveraendert. AudioLevelMeter in
+meter_widgets.py waehlt nur die Darstellung des bereits vorhandenen Pegels:
+- LED: 30 gruen/gelb/rote Segmente, -60..0-dBFS-Anzeigeskala.
+- VU: bisheriges AnalogVUMeter, einschliesslich Zeigerbewegung und Skala.
+Die visuelle Skalierung ist nicht Teil der Silence-Alarm-Auswertung.
+
+EINSTELLUNG
+General > Level display enthaelt genau LED und VU.
+Gespeichert wird meter_display_mode in der vorhandenen Konfigurationsdatei.
+Standard und Fallback fuer fehlende/ungueltige Werte (auch Classic): LED.
+Save und Close uebernehmen die Anzeige ohne Monitor-Neustart. Beim naechsten
+Start wird die gespeicherte Auswahl wiederhergestellt.
+
+ERFOLGREICHE TESTS
+1. Bestehender selftest.py:
+   Syntax, Icon-Ressourcen, Ersteinrichtung, Passwortschutz/Roundtrip,
+   Konfigurationsmigration, Theme, RadioBOSS-Titel/Playlist/NextTrack,
+   Cover-Fallback, Wetter deaktiviert, BroadcastVoice und Hour Watch.
+2. Alle 6 Tests aus test_connection_recovery.py.
+3. Alle 8 neuen Tests aus test_display_modes.py:
+   - LED-Standard und Classic-/Fehler-Fallback.
+   - Genau zwei Optionen; Speichern ohne Verlust anderer Einstellungen.
+   - Ungespeicherte Auswahl veraendert die Datei nicht.
+   - Wechsel ueber das echte Qt-Einstellungsfenster und Wiederherstellung
+     nach Neuerzeugung des Monitors; keine zusaetzlichen Worker/Timer.
+   - Identischer Datenfeed fuer linken/rechten Kanal in beiden Modi.
+   - Silence Alarm behaelt seine Laufzeit beim Wechsel; Audio-Rueckkehr
+     und fehlendes Audio werden unveraendert behandelt.
+   - Unveraenderte VU-Bewegung und korrekter LED-Anzeigebereich.
+   - Screenshot-Vergleich: ausserhalb der beiden Meterflaechen sind die
+     Pixel bei gleichem Datenfeed und eingefrorener Uhr identisch.
+     Titel, ON AIR, Restzeit, Hour Watch und Icon bleiben erhalten.
+4. Visuelle Kontrolle mit Qt-Rendering:
+   LED/VU in Dark bei 1250x780 und Light bei 900x620; Settings bei 820x610.
+5. PyInstaller-Testbuild unter Linux erfolgreich. Die eigenstaendige
+   Anwendung startet mit gespeicherter LED- sowie VU-Auswahl. Beide Starts
+   fragen erfolgreich den lokalen RadioBOSS-Testserver ab (je 8 Requests).
+   Keine Import-/Qt-Startfehler. Keine reale Station wurde kontaktiert.
+
+QUELLVERGLEICH
+- Originale AnalogVUMeter-Klasse in das Meter-Modul verschoben, unveraendert.
+- Alle anderen Widget-Klassen unveraendert.
+- Monitor-Methoden apply_audio(), apply_state(), Timing, Silence Alarm,
+  RadioBOSS-/Wetter-Abfragen, Watchdogs und Shutdown unveraendert.
+- Im Monitor nur Erzeugung der Meter, Anwendung der gespeicherten Auswahl
+  beim Schliessen der Settings und Versionsanzeige angepasst.
+- Backend nur um Modus-Standard/Normalisierung und Versionsanzeige ergaenzt.
+- studio_monitor_icon.ico, studio_monitor_icon.png und secret_store.py
+  bytegleich mit v1.0.17. Windows-App-ID und Icon-Einbindung unveraendert.
+- Builder fuehrt die neuen Qt-Tests vor der Paketierung aus.
+
+TESTUMGEBUNG UND OFFENE WINDOWS-PRUEFUNG
+Python 3.12.14, PySide6/Qt 6.11.2, PyInstaller 6.22.3, Linux x86_64.
+Der Linux-Testbuild ersetzt keinen Windows-Build. In dieser Umgebung gibt
+es keinen Windows-/Core-Audio-Zugriff. Ein Windows-EXE-Build sowie der Test
+mit dem laufenden RadioBOSS und echtem Windows-Ausgabeaudio sind noch offen.
+Windows-Anleitung: UPDATE-DE.txt und BUILD-EXE.bat.

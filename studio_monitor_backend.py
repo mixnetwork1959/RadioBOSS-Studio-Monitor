@@ -1,5 +1,5 @@
 from __future__ import annotations
-import copy, json, os, sys, threading, time, urllib.parse, urllib.request, re
+import base64, copy, json, os, sys, threading, time, urllib.parse, urllib.request, re
 import xml.etree.ElementTree as ET
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -72,6 +72,7 @@ DEFAULT_DOCUMENT = {
   "configured": False,
   "application_title": "RadioBOSS Studio Monitor",
   "theme": "dark",
+  "meter_display_mode": "led",
   "station": DEFAULT_STATION,
   "refresh_interval_ms": 1500,
   "start_maximized": True,
@@ -104,6 +105,11 @@ RUNTIME_DEFAULT = {
 
 def _new_document():
     return copy.deepcopy(DEFAULT_DOCUMENT)
+
+
+def normalize_meter_display_mode(value):
+    """Accept only the two display modes; absent/legacy values use LED."""
+    return "vu" if str(value or "").strip().lower() == "vu" else "led"
 
 
 def _normalise_station(profile):
@@ -139,6 +145,7 @@ def _document_from_data(data):
     for key in DEFAULT_DOCUMENT:
         if key != "station" and key in data:
             doc[key]=data[key]
+    doc["meter_display_mode"]=normalize_meter_display_mode(doc.get("meter_display_mode"))
 
     station_source=data.get("station")
     if not isinstance(station_source,dict):
@@ -267,6 +274,83 @@ def track(node):
         "ARTIST","TITLE","ALBUM","YEAR","GENRE","FILENAME","DURATION","CASTTITLE",
         "BPM","LISTENERS","BITRATE","SAMPLERATE","CHANNELS","ITEMTYPE","STARTTIME"
     ]}
+
+def _looks_like_image(data):
+    data=bytes(data or b"")
+    if len(data) < 8:
+        return False
+    return (
+        data.startswith(b"\x89PNG\r\n\x1a\n")
+        or data.startswith(b"\xff\xd8\xff")
+        or data.startswith((b"GIF87a", b"GIF89a"))
+        or data.startswith(b"BM")
+        or (len(data) >= 12 and data[:4] in (b"RIFF", b"RIFX") and data[8:12] == b"WEBP")
+    )
+
+
+def _readtag_artwork(cfg, track):
+    """Read embedded artwork through RadioBOSS readtag as a fallback."""
+    filename=str((track or {}).get("filename") or "").strip()
+    if not filename:
+        return b""
+    try:
+        raw=fetch_bytes(rb_url_params(cfg,"readtag",fn=filename,artwork=1), timeout=2.5)
+        root=ET.fromstring(raw)
+        node=root.find(".//File")
+        if node is None:
+            return b""
+        attrs={str(k).lower():str(v) for k,v in (node.attrib or {}).items()}
+        encoded=attrs.get("artwork_base64","").strip()
+        if not encoded:
+            return b""
+        data=base64.b64decode(encoded, validate=False)
+        return data if _looks_like_image(data) else b""
+    except Exception:
+        return b""
+
+
+def rb_artwork(cfg, slot, track):
+    """Fetch artwork robustly; validate API bytes and fall back to readtag."""
+    action="trackartwork" if slot=="current" else "nexttrackartwork"
+    try:
+        data=fetch_bytes(rb_url(cfg,action), timeout=1.5)
+        if _looks_like_image(data):
+            return data
+    except Exception:
+        pass
+    return _readtag_artwork(cfg, track)
+
+
+def playlist_next_track(playlist):
+    """Return the first upcoming playlist row in playback order."""
+    direct=dict((playlist or {}).get("next_track") or {})
+    if direct:
+        return {k:direct.get(k,"") for k in ("artist","title","album","year","filename","duration","bpm","itemtype")}
+    rows=list((playlist or {}).get("tracks") or [])
+    if not rows:
+        return {}
+    for row in rows:
+        if str(row.get("status") or "").upper()=="UP NEXT":
+            return {k:row.get(k,"") for k in ("artist","title","album","year","filename","duration","bpm","itemtype")}
+    for idx,row in enumerate(rows):
+        if str(row.get("status") or "").upper()=="PLAYING" and idx+1 < len(rows):
+            nxt=rows[idx+1]
+            return {k:nxt.get(k,"") for k in ("artist","title","album","year","filename","duration","bpm","itemtype")}
+    return {}
+
+
+def merge_next_track(api_next, playlist):
+    """Prefer playbackinfo NextTrack, filling missing fields from the playlist."""
+    api=dict(api_next or {})
+    fallback=playlist_next_track(playlist)
+    identity=any(str(api.get(k) or "").strip() for k in ("artist","title","filename"))
+    if not identity:
+        return fallback
+    for k,v in fallback.items():
+        if not str(api.get(k) or "").strip() and str(v or "").strip():
+            api[k]=v
+    return api
+
 
 def rb_state(cfg):
     api=f'{cfg["radioboss_host"]}:{cfg["radioboss_port"]}'
@@ -511,9 +595,11 @@ def playlist_state(cfg, playback=None, current=None):
 
         total=sum(float(r.get("duration_seconds",0) or 0) for r in hour_rows)
         to_hour=max(0,3600-(now.minute*60+now.second))
+        next_track=dict(rows[current_idx+1]) if current_idx+1 < len(rows) else {}
         return {
             "ok":True,
             "tracks":hour_rows,
+            "next_track":next_track,
             "hour_label":f"{now.hour:02d}:00 - {(now.hour+1)%24:02d}:00",
             "total_seconds":total,
             "time_left_seconds":to_hour,
@@ -978,13 +1064,12 @@ def _find_broadcastvoice_dir(cfg):
     return None
 
 def bv_state(cfg):
-    """Read BroadcastVoice state/config only. Never sends commands."""
+    """Read BroadcastVoice announcer/service state only. Never sends commands."""
     root=_find_broadcastvoice_dir(cfg)
     if root is None:
         return {
             "connected":False,"running":False,"announcer":"—","next_link":"—",
-            "anchor_in":"—","max_cut":"—","filler":"—","full_hour_block":"—",
-            "stop_mode":"—","prepared":"—","source":"not found"
+            "source":"not found"
         }
 
     try:
@@ -992,11 +1077,9 @@ def bv_state(cfg):
     except Exception as e:
         return {
             "connected":False,"running":False,"announcer":"—","next_link":"—",
-            "anchor_in":"—","max_cut":"—","filler":"—","full_hour_block":"—",
-            "stop_mode":"—","prepared":"—","source":str(root),"error":str(e)
+            "source":str(root),"error":str(e)
         }
 
-    hc=bv_cfg.get("hour_close") or {}
     service=bv_cfg.get("service") or {}
     announcer=(
         bv_cfg.get("announcer")
@@ -1006,32 +1089,24 @@ def bv_state(cfg):
         or "—"
     )
 
-    # worker.lock is only observed. If absent, no claim that BV is running.
-    # BroadcastVoice's own background module uses these exact runtime files:
-    #   runtime/broadcastvoice.pid
-    #   runtime/broadcastvoice-worker.lock
-    # We only observe them; no writes or commands.
+    # BroadcastVoice runtime files are observed read-only.
     runtime_dir=root/"runtime"
     pid_file=runtime_dir/"broadcastvoice.pid"
     worker_lock=runtime_dir/"broadcastvoice-worker.lock"
 
     running=False
     pid=None
-
     if pid_file.is_file():
         try:
             pid=int(pid_file.read_text(encoding="ascii", errors="ignore").strip())
         except Exception:
             pid=None
 
-    # A live worker lock is also a valid running signal. This mirrors
-    # BroadcastVoice's own "running without pid" fallback.
     if worker_lock.exists():
         running=True
 
     if pid:
         try:
-            # Windows read-only process existence check via tasklist.
             import subprocess
             check=subprocess.run(
                 ["tasklist","/FI",f"PID eq {pid}","/NH"],
@@ -1042,10 +1117,8 @@ def bv_state(cfg):
             if str(pid) in text and "No tasks" not in text and "Keine Aufgaben" not in text:
                 running=True
         except Exception:
-            # Keep worker-lock result if process probing is unavailable.
             pass
 
-    # Read optional runtime/status JSONs if BroadcastVoice provides them.
     runtime={}
     for rp in (
         root/"status.json", root/"runtime"/"status.json",
@@ -1061,15 +1134,9 @@ def bv_state(cfg):
 
     running=bool(runtime.get("running",running))
 
-    # BroadcastVoice v0.4.3: determine the active announcer with the same
-    # shift/default rule used by its schedule.py. An optional override file
-    # wins when present.
     announcers=bv_cfg.get("announcers") or []
     override=""
-    for op in (
-        runtime_dir/"announcer-override.txt",
-        root/"announcer-override.txt",
-    ):
+    for op in (runtime_dir/"announcer-override.txt", root/"announcer-override.txt"):
         if op.is_file():
             try:
                 override=op.read_text(encoding="utf-8",errors="ignore").strip()
@@ -1105,7 +1172,6 @@ def bv_state(cfg):
                 return True
             if start_m < end_m:
                 return start_m <= now_minutes < end_m
-            # Overnight shift.
             return now_minutes >= start_m or now_minutes < end_m
 
         for profile in announcers:
@@ -1121,8 +1187,8 @@ def bv_state(cfg):
     else:
         announcer_id=""
 
-    # BroadcastVoice v0.4.3 cadence is track based, not wall-clock based.
-    # Reproduce dashboard.tracks_until_next_link() from runtime/state.json.
+    # BroadcastVoice cadence is track-based. Reproduce the local counter only;
+    # the Studio Monitor never triggers an announcer link.
     next_link=runtime.get("next_link") or runtime.get("next_link_in")
     if not next_link:
         try:
@@ -1137,100 +1203,10 @@ def bv_state(cfg):
             remainder=counter % every
             tracks_left=every if remainder==0 else every-remainder
             pending=bool(state_data.get("link_pending",False))
-            next_link=("JETZT" if pending else f"{tracks_left} TRACK"
+            next_link=("NOW" if pending else f"{tracks_left} TRACK"
                        if tracks_left==1 else f"{tracks_left} TRACKS")
         except Exception:
             next_link="—"
-    # BroadcastVoice v0.4.3 does not publish live Hour-Close fields in
-    # runtime/state.json. Read its real config names and derive only values
-    # that are unambiguous for display.
-    enabled=bool(hc.get("enabled",False))
-    observe_only=bool(hc.get("observe_only",False))
-    mode=str(hc.get("mode") or ("observe" if observe_only else "live")).strip()
-    stop=bool(hc.get("stop_after_final_element",False))
-
-    max_cut=hc.get("maximum_song_cut_seconds","—")
-    prepare_before=float(hc.get("prepare_before_seconds",0) or 0)
-    filler_folder=str(hc.get("filler_music_folder") or "").strip()
-    filler=filler_folder if filler_folder else "AUS"
-
-    # v0.4.3 uses the named RadioBOSS anchor event rather than a fixed
-    # full_hour_block_seconds value. The scheduler state already resolves
-    # that event from Admin.sdl, so use its countdown when names match.
-    anchor_name=str(hc.get("anchor_event") or "").strip()
-    anchor_in="—"
-    anchor_seconds=None
-    if enabled and anchor_name:
-        try:
-            sc=scheduler_state(cfg)
-            if str(sc.get("name") or "").strip().lower() == anchor_name.lower():
-                anchor_seconds=sc.get("seconds")
-                anchor_in=_fmt_seconds(anchor_seconds)
-        except Exception:
-            pass
-
-    # If the exact anchor is not the very next scheduler event, search the
-    # same read-only Admin.sdl for that named event.
-    if enabled and anchor_name and anchor_seconds is None:
-        try:
-            sdl=_find_admin_sdl(cfg)
-            if sdl and sdl.is_file():
-                now_dt=datetime.now()
-                matches=[]
-                for ev in _parse_admin_sdl(sdl):
-                    if str(ev.get("EnabledEvent","0")) != "1":
-                        continue
-                    name=ev.get("TaskName") or ev.get("FileName") or "RadioBOSS Event"
-                    if str(name).strip().lower() != anchor_name.lower():
-                        continue
-                    try:
-                        time_type=int(ev.get("TimeType","0") or 0)
-                    except:
-                        time_type=0
-                    if time_type == 1:
-                        hours=_decode_hours(ev.get("Hours",""))
-                        minutes=_decode_minutes(ev.get("Minutes",""))
-                        try:
-                            second=max(0,min(59,int(ev.get("Seconds","0") or 0)))
-                        except:
-                            second=0
-                        for day_offset in range(0,8):
-                            day=now_dt+timedelta(days=day_offset)
-                            if not _sdl_weekday_enabled(ev.get("Days",""),day):
-                                continue
-                            for hour in hours:
-                                for minute in minutes:
-                                    dt=day.replace(hour=hour,minute=minute,second=second,microsecond=0)
-                                    if dt>now_dt:
-                                        matches.append(dt)
-                    elif time_type == 2:
-                        try:
-                            dt=datetime.strptime(str(ev.get("DateTime","")).strip(),"%Y-%m-%d %H:%M:%S")
-                            if dt>now_dt:
-                                matches.append(dt)
-                        except:
-                            pass
-                if matches:
-                    anchor_seconds=max(0,(min(matches)-now_dt).total_seconds())
-                    anchor_in=_fmt_seconds(anchor_seconds)
-        except Exception:
-            pass
-
-    prepared=runtime.get("hour_close_prepared")
-    if prepared is None:
-        prepared=runtime.get("prepared")
-    if prepared is True:
-        prepared_text="YES"
-    elif prepared is False:
-        prepared_text="NO"
-    elif anchor_seconds is not None and prepare_before>0:
-        prepared_text="YES" if anchor_seconds <= prepare_before else "NO"
-    else:
-        prepared_text="—"
-
-    # There is no fixed full-hour-block duration in v0.4.3 config.
-    # Show the actual configured anchor instead of the misleading old "0 s".
-    block_text=anchor_name if anchor_name else "—"
 
     return {
         "connected":True,
@@ -1238,17 +1214,106 @@ def bv_state(cfg):
         "announcer":str(announcer),
         "announcer_id":str(announcer_id),
         "next_link":str(next_link),
-        "anchor_in":str(anchor_in),
-        "max_cut":str(max_cut) if max_cut not in (None,"") else "—",
-        "filler":str(filler),
-        "full_hour_block":block_text,
-        "stop_mode":"ACTIVE" if stop else "OFF",
-        "mode":mode.upper() if enabled else "OFF",
-        "prepared":prepared_text,
         "source":str(root),
         "pid":pid,
         "worker_lock":worker_lock.exists(),
     }
+
+
+def hour_watch_state(cfg):
+    """Passive full-hour watch based solely on RadioBOSS Scheduler data."""
+    now=datetime.now()
+    next_hour=now.replace(minute=0,second=0,microsecond=0)+timedelta(hours=1)
+    seconds=max(0,(next_hour-now).total_seconds())
+    watch_start=next_hour-timedelta(minutes=3)
+    watch_end=next_hour+timedelta(minutes=2)
+    sdl=_find_admin_sdl(cfg)
+
+    base={
+        "read_only":True,
+        "next_hour":next_hour.strftime("%H:%M:%S"),
+        "seconds":seconds,
+        "events":[],
+        "status":"WATCHING",
+        "configured":bool(sdl),
+        "source":str(sdl) if sdl else "",
+    }
+    if not sdl or not sdl.is_file():
+        base.update({"status":"NO SCHEDULER","configured":False})
+        return base
+
+    try:
+        events=_parse_admin_sdl(sdl)
+        candidates=[]
+        for ev in events:
+            if str(ev.get("EnabledEvent","0")) != "1":
+                continue
+            name=ev.get("TaskName") or ev.get("FileName") or "RadioBOSS Event"
+            try:
+                time_type=int(ev.get("TimeType","0") or 0)
+            except Exception:
+                time_type=0
+
+            if time_type == 1:
+                hours=_decode_hours(ev.get("Hours",""))
+                minutes=_decode_minutes(ev.get("Minutes",""))
+                try:
+                    second=max(0,min(59,int(ev.get("Seconds","0") or 0)))
+                except Exception:
+                    second=0
+                day=watch_start.replace(hour=0,minute=0,second=0,microsecond=0)
+                last_day=watch_end.replace(hour=0,minute=0,second=0,microsecond=0)
+                while day <= last_day:
+                    if _sdl_weekday_enabled(ev.get("Days",""),day):
+                        for hour in hours:
+                            for minute in minutes:
+                                dt=day.replace(hour=hour,minute=minute,second=second,microsecond=0)
+                                if watch_start <= dt <= watch_end:
+                                    candidates.append((dt,name,ev.get("GroupName","")))
+                    day += timedelta(days=1)
+
+            elif time_type == 2:
+                raw=ev.get("DateTime","").strip()
+                try:
+                    dt=datetime.strptime(raw,"%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    dt=None
+                if dt is not None:
+                    if str(ev.get("EveryYear","0"))=="1":
+                        try:
+                            dt=dt.replace(year=next_hour.year)
+                        except Exception:
+                            pass
+                    if watch_start <= dt <= watch_end:
+                        candidates.append((dt,name,ev.get("GroupName","")))
+
+        candidates.sort(key=lambda x:x[0])
+        rows=[]
+        for dt,name,group in candidates[:4]:
+            rows.append({
+                "time":dt.strftime("%H:%M:%S"),
+                "name":str(name),
+                "group":str(group or ""),
+                "seconds_from_hour":int(round((dt-next_hour).total_seconds())),
+                "passed":dt < now,
+            })
+        base["events"]=rows
+
+        if seconds <= 180:
+            future=[x for x in candidates if x[0] >= now]
+            recent=[x for x in candidates if x[0] < now]
+            if future:
+                base["status"]="READY"
+            elif recent:
+                base["status"]="ACTIVE"
+            else:
+                base["status"]="NO HOUR EVENT"
+        else:
+            base["status"]="WATCHING"
+        return base
+    except Exception as e:
+        base.update({"status":"SCHEDULER ERROR","error":str(e)})
+        return base
 
 
 _WEATHER_LOCK=threading.Lock()
@@ -1364,6 +1429,7 @@ class Handler(SimpleHTTPRequestHandler):
             d=cached_rb_state()
             d["scheduler"]=scheduler_state(cfg)
             d["broadcastvoice"]=bv_state(cfg)
+            d["hour_watch"]=hour_watch_state(cfg)
             d["audio"]=audio_state()
             d["playlist"]=playlist_state(cfg, d.get("playback") or {}, d.get("current") or {})
             b=json.dumps(d,ensure_ascii=False).encode("utf-8")
@@ -1446,7 +1512,7 @@ def main():
         name="Browser-Heartbeat-Watchdog",
     ).start()
     print("="*68)
-    print("RadioBOSS Studio Monitor v1.0.12")
+    print("RadioBOSS Studio Monitor v1.0.18")
     print("="*68)
     print("Studio Monitor:",url)
     print(f'RadioBOSS API : {cfg["radioboss_host"]}:{cfg["radioboss_port"]}')

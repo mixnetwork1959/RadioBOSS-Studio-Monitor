@@ -1,6 +1,17 @@
-# RadioBOSS Studio Monitor v1.0.14
+# RadioBOSS Studio Monitor v1.0.18
 
-Connection recovery update based on the v1.0.13 source package.
+LED/VU display update based on v1.0.17, retaining the existing application icon,
+monitor logic and layout. Choose **LED** or **VU** in **Settings > General >
+Level display**, then **Save** and **Close**. The choice is applied immediately
+on returning to the dashboard and restored on the next start. LED is the default;
+Classic is not a selectable mode. Older or unrecognized mode values use LED.
+
+Both displays consume the same existing left/right Windows output-level feed.
+The analogue VU face and needle movement are retained; LED uses green, amber
+and red segments on a -60..0 dBFS display scale. Display scaling does not change
+silence detection or any other monitor logic.
+
+Existing connection-recovery behavior remains:
 
 - Failed polls invalidate the green connection status immediately.
 - The watchdog also detects stale data when no worker is marked busy.
@@ -9,15 +20,14 @@ Connection recovery update based on the v1.0.13 source package.
 - Diagnostics show the last successful update, data age and last polling error.
 - GUI watchdog no longer restarts the application after normal shutdown.
 
-Validation: existing self-tests and six recovery regression tests pass on Linux.
-Windows EXE build, Windows audio and a live overnight RadioBOSS run still need
-verification on Windows. The exact cause of the original sendall exception has
-not been reproduced; this release hardens request isolation and failure handling.
+Validation: the existing self-test, six connection-recovery tests and eight new
+Qt display-mode tests pass on Linux. The new checks cover settings, persistence,
+restart, shared audio input, silence-alarm continuity and pixel comparison outside
+the meter area. The Windows EXE build and live Windows audio still require a
+Windows machine. See VALIDATION-LED-VU.txt for the exact validation scope.
 
 
-RadioBOSS Studio Monitor is a portable Windows dashboard for one local RadioBOSS installation. It displays the current and next track, remaining time, artwork, current-hour playlist, studio clock, optional weather, optional RadioBOSS Scheduler information, optional BroadcastVoice status and Windows output-level meters.
-
-The Windows binary is distributed as **freeware**: it is a free download and requires no activation or licence key.
+RadioBOSS Studio Monitor is a portable Windows dashboard for one local RadioBOSS installation. It displays the current and next track, remaining time, artwork, current-hour playlist, studio clock, optional weather, optional RadioBOSS Scheduler information, optional BroadcastVoice announcer status, a passive Hour Watch and Windows output-level meters.
 
 This public edition contains no station-specific settings, passwords, logs or media.
 
@@ -33,7 +43,8 @@ This public edition contains no station-specific settings, passwords, logs or me
 - RadioBOSS and weather requests run separately, with watchdog recovery
 - Optional Open-Meteo weather and sea-surface temperature
 - Optional read-only Scheduler and BroadcastVoice panels
-- Animated VU meters, a responsive DJ jogwheel and a playback-aware 15-second silence alarm
+- Passive **HOUR WATCH** around the next full hour; it observes Scheduler events and never changes RadioBOSS playback or the playlist
+- Switchable LED segment / analogue VU meters, a responsive DJ jogwheel and a playback-aware 15-second silence alarm
 - RadioBOSS passwords protected with Windows DPAPI for the current Windows user
 
 ## RadioBOSS preparation
@@ -80,16 +91,26 @@ BUILD-EXE.bat
 The script installs the required packages, runs the self-test, builds the portable EXE and creates:
 
 ```text
-RadioBOSS-Studio-Monitor-v1.0.14-Windows.zip
+RadioBOSS-Studio-Monitor-v1.0.18-Windows.zip
 ```
 
 The generated public ZIP contains only the EXE, README and notice. It deliberately excludes configuration and log files.
 
+### Changes in v1.0.17
+
+- New dedicated Studio Monitor application icon for the EXE, Windows taskbar and application window.
+- The icon resource is bundled into the one-file Windows build.
+
+- removed every former experimental full-hour control status, cut, filler, stop and preparation field from Studio Monitor
+- BroadcastVoice monitoring now shows only service state, active announcer and tracks until the next announcer link
+- added **HOUR WATCH · READ ONLY** as a passive replacement
+- Hour Watch shows the next full hour and Scheduler events from three minutes before until two minutes after it
+- Hour Watch can show `WATCHING`, `READY`, `ACTIVE`, `NO HOUR EVENT`, `NO SCHEDULER` or `SCHEDULER ERROR`
+- Hour Watch never sends a command to RadioBOSS and never inserts, removes, stops or edits playlist items
+- existing full-hour countdown and warning colours remain monitor-only
+
 ### Changes in v1.0.14
 
-- added a dedicated Studio Monitor application icon for the EXE, window title bar and Windows taskbar
-- added a stable Windows AppUserModelID so taskbar grouping keeps the correct application identity
-- marked the public Windows binary as freeware with no activation or licence key required
 - fixed RadioBOSS Scheduler and BroadcastVoice group titles being crossed or partially hidden by their top borders
 - added proper title spacing and an opaque title background in both dark and light themes
 - removed the remaining old two-station configuration model, active-station selector and button-label metadata
@@ -141,7 +162,7 @@ The generated public ZIP contains only the EXE, README and notice. It deliberate
 - next track is now a compact text line inside the Current Track panel
 - removed the separate next-track cover and its repeated artwork request
 - Current Track expands across three columns while the jogwheel keeps a sensible width
-- Scheduler, upcoming events, BroadcastVoice and Hour Close share one compact right panel
+- Scheduler, upcoming events and BroadcastVoice share one compact right panel
 - rebalanced row heights to use the reclaimed middle-row space
 
 ### Changes in v1.0.5
@@ -198,10 +219,10 @@ Run the offline automated checks with `RUN-TESTS.bat`. Use `Test RadioBOSS API.b
 ## Optional integrations
 
 - **Scheduler:** enter the path to RadioBOSS `Admin.sdl` or an exported scheduler JSON file.
-- **BroadcastVoice:** enter the BroadcastVoice directory or a compatible status JSON file.
+- **BroadcastVoice:** enter the local BroadcastVoice directory to display service state, announcer and next-link information.
 - **Audio meters:** require `pycaw` and `comtypes`; the public EXE build includes them.
 
-All Scheduler and BroadcastVoice access is read-only.
+All Scheduler and BroadcastVoice access is read-only. Hour Watch also uses Scheduler data read-only and has no playback-control capability.
 
 ## Privacy and security
 
@@ -216,3 +237,11 @@ All Scheduler and BroadcastVoice access is read-only.
 This is the first neutral public build derived from the original private Studio Monitor. Test the Windows EXE with a non-production RadioBOSS installation before publishing it broadly. Select a source/binary licence before the first external source-code release.
 
 RadioBOSS is a trademark of DJSoft.net. This independent community project is not affiliated with or supported by DJSoft.net.
+
+## v1.0.16 - artwork and Next Track recovery
+
+- keeps the passive HOUR WATCH from v1.0.15 unchanged
+- if RadioBOSS `playbackinfo` does not expose a usable `NextTrack`, the monitor now uses the row marked `UP NEXT` from the read-only playlist data
+- artwork API responses are validated as real image bytes before they are cached
+- when `trackartwork` / `nexttrackartwork` does not return an image, the monitor falls back to RadioBOSS `readtag&artwork=1` for the track filename
+- no playlist or playback command is introduced; all new fallbacks are read-only

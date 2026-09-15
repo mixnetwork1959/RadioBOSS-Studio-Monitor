@@ -10,7 +10,7 @@ import studio_monitor_backend as backend
 
 
 print("="*68)
-print("RadioBOSS API Diagnostics - Studio Monitor v1.0.12")
+print("RadioBOSS API Diagnostics - Studio Monitor v1.0.17")
 print("="*68)
 print("Configuration:",backend.CONFIG)
 

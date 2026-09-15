@@ -3,6 +3,7 @@
   "configured": false,
   "application_title": "RadioBOSS Studio Monitor",
   "theme": "dark",
+  "meter_display_mode": "led",
   "station": {
     "name": "My Radio Station",
     "radioboss_host": "127.0.0.1",

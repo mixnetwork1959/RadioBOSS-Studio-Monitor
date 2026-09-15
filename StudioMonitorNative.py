@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 import studio_monitor_backend as backend
 from settings_dialog import SettingsDialog
+from meter_widgets import AudioLevelMeter
 
 BASE = (
     Path(sys.executable).resolve().parent
@@ -24,25 +25,20 @@ BASE = (
 backend.CONFIG = BASE / "studio_monitor_config.json"
 
 
-def _resource_path(name: str) -> Path:
-    """Return a packaged resource path in source and PyInstaller builds."""
-    bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return bundle / name
+def resource_path(name: str) -> Path:
+    """Return a bundled application resource both in source and PyInstaller builds."""
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return bundle_root / name
 
 
-def _application_icon() -> QIcon:
-    path = _resource_path("studio_monitor.ico")
-    return QIcon(str(path)) if path.exists() else QIcon()
-
-
-def _set_windows_app_id():
-    """Give Windows a stable taskbar identity for correct grouping/icon display."""
-    if os.name != "nt":
+def set_windows_app_id():
+    """Give Windows a stable taskbar identity so the packaged icon is used."""
+    if sys.platform != "win32":
         return
     try:
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "RadioBOSSCommunity.StudioMonitor"
+            "RadioBOSS.StudioMonitor.1.0"
         )
     except Exception:
         pass
@@ -117,164 +113,6 @@ class DataSignals(QObject):
     weather = Signal(dict)
     audio = Signal(dict)
     error = Signal(str)
-
-class AnalogVUMeter(QWidget):
-    """Animated analogue VU meter driven by a normalized 0..1 audio level."""
-    def __init__(self, channel="L", parent=None):
-        super().__init__(parent)
-        self.channel = channel
-        self.value = 0.0
-        self.target = 0.0
-        self.setMinimumSize(180, 120)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self.timer = QTimer(self)
-        self.timer.setInterval(16)
-        self.timer.timeout.connect(self._animate)
-        self.timer.start()
-
-    def set_level(self, level):
-        try:
-            level = float(level)
-        except Exception:
-            level = 0.0
-        self.target = max(0.0, min(1.0, level))
-
-    def _animate(self):
-        # Fast attack, slower return, similar to a physical VU needle.
-        rate = 0.34 if self.target > self.value else 0.095
-        self.value += (self.target - self.value) * rate
-        if abs(self.target - self.value) < 0.0005:
-            self.value = self.target
-        self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-
-        # Use almost the complete widget for the scale. The old thick metal
-        # housing reduced the face and pushed the outer labels over its edge.
-        face = QRectF(self.rect()).adjusted(2, 2, -2, -2)
-        p.setPen(QPen(QColor("#6d6352"), .8))
-        p.setBrush(QColor("#e8d6a7"))
-        p.drawRoundedRect(face, 5, 5)
-
-        # One fine highlight replaces the previous heavy outer frame.
-        p.setPen(QPen(QColor("#fff1c3"), .6))
-        p.drawRoundedRect(face.adjusted(1, 1, -1, -1), 4, 4)
-
-        w, h = face.width(), face.height()
-        cx = face.center().x()
-        pivot_y = face.bottom() - 7.0
-        radius_x = w * .56
-        radius_y = h * .86
-
-        # Scale occupies about 80 degrees.
-        start_deg = 218.0
-        end_deg = 322.0
-
-        labels = [
-            (0.00, "-20"),
-            (0.13, "-10"),
-            (0.25, "-7"),
-            (0.36, "-5"),
-            (0.47, "-3"),
-            (0.57, "-2"),
-            (0.66, "-1"),
-            (0.75, "0"),
-            (0.84, "+1"),
-            (0.92, "+2"),
-            (1.00, "+3"),
-        ]
-
-        # Broad classic VU scale line, with a heavier red overload section.
-        scale_ratio=.80
-        scale_rect=QRectF(
-            cx-radius_x*scale_ratio,
-            pivot_y-radius_y*scale_ratio,
-            radius_x*scale_ratio*2,
-            radius_y*scale_ratio*2,
-        )
-        qt_start=(360.0-start_deg)*16
-        full_span=-(end_deg-start_deg)*16
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor("#302b23"),1.2))
-        p.drawArc(scale_rect,int(qt_start),int(full_span))
-
-        red_start_frac=.78
-        red_start_deg=start_deg+(end_deg-start_deg)*red_start_frac
-        red_qt_start=(360.0-red_start_deg)*16
-        red_span=-(end_deg-red_start_deg)*16
-        p.setPen(QPen(QColor("#c52c2c"),4.2,Qt.SolidLine,Qt.FlatCap))
-        p.drawArc(scale_rect,int(red_qt_start),int(red_span))
-
-        # ticks + labels
-        font = p.font()
-        font.setPointSizeF(max(7.0, min(9.0, w / 34)))
-        font.setBold(True)
-        p.setFont(font)
-
-        for frac, label in labels:
-            deg = start_deg + (end_deg - start_deg) * frac
-            ang = math.radians(deg)
-            red_zone = frac > 0.75
-            col = QColor("#b42828") if red_zone else QColor("#24211b")
-            p.setPen(QPen(col, 1.5))
-
-            x1 = cx + math.cos(ang) * radius_x * 0.66
-            y1 = pivot_y + math.sin(ang) * radius_y * 0.66
-            x2 = cx + math.cos(ang) * radius_x * 0.83
-            y2 = pivot_y + math.sin(ang) * radius_y * 0.83
-            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-
-            tx = cx + math.cos(ang) * radius_x * 0.94
-            ty = pivot_y + math.sin(ang) * radius_y * 0.94
-            tr = QRectF(tx - 14, ty - 7, 28, 14)
-            p.drawText(tr, Qt.AlignCenter, label)
-
-        # finer intermediate ticks
-        p.setPen(QPen(QColor("#494237"), 0.8))
-        for i in range(41):
-            frac = i / 40.0
-            if any(abs(frac - f) < 0.012 for f, _ in labels):
-                continue
-            deg = start_deg + (end_deg - start_deg) * frac
-            ang = math.radians(deg)
-            tick_len = 0.045 if i % 2 else 0.075
-            x1 = cx + math.cos(ang) * radius_x * (0.80 - tick_len)
-            y1 = pivot_y + math.sin(ang) * radius_y * (0.80 - tick_len)
-            x2 = cx + math.cos(ang) * radius_x * 0.80
-            y2 = pivot_y + math.sin(ang) * radius_y * 0.80
-            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-
-        # VU + channel marking
-        f = p.font()
-        f.setPointSizeF(max(7.0, min(12.0, w / 22)))
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QColor("#1f1d19"))
-        p.drawText(QRectF(face.left()+12, face.top()+9, 42, 20), Qt.AlignLeft|Qt.AlignVCenter, "VU")
-        p.drawText(QRectF(face.right()-42, face.top()+9, 30, 20), Qt.AlignRight|Qt.AlignVCenter, self.channel)
-
-        # needle
-        deg = start_deg + (end_deg - start_deg) * self.value
-        ang = math.radians(deg)
-        tip_x = cx + math.cos(ang) * radius_x * 0.77
-        tip_y = pivot_y + math.sin(ang) * radius_y * 0.77
-
-        # tiny shadow then needle
-        p.setPen(QPen(QColor(0, 0, 0, 80), 3, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(cx+1, pivot_y+1), QPointF(tip_x+1, tip_y+1))
-        p.setPen(QPen(QColor("#191919"), 1.7, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(cx, pivot_y), QPointF(tip_x, tip_y))
-
-        # pivot
-        p.setBrush(QColor("#202020"))
-        p.setPen(QPen(QColor("#5c5c5c"), 1))
-        p.drawEllipse(QPointF(cx, pivot_y), 4.5, 4.5)
-
-        p.end()
-
 
 class _LegacyTurntableWidget(QWidget):
     def __init__(self, parent=None):
@@ -611,7 +449,6 @@ class _LegacyTurntableWidget(QWidget):
         finally:
             if p.isActive():
                 p.end()
-
 
 
 class TurntableWidget(QWidget):
@@ -1231,8 +1068,7 @@ class StudioMonitor(QMainWindow):
             "current":{"key":"","data":b"","attempt":0.0},
             "next":{"key":"","data":b"","attempt":0.0},
         }
-        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.14")
-        self.setWindowIcon(_application_icon())
+        self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.18")
         self.resize(1680, 940)
         self.setMinimumSize(900, 620)
 
@@ -1279,8 +1115,9 @@ class StudioMonitor(QMainWindow):
         self.brand_panel=Panel(str(station.get("name") or "RADIO STATION").upper())
         vu_top=QHBoxLayout()
         vu_top.setSpacing(10)
-        self.vu_left=AnalogVUMeter("L")
-        self.vu_right=AnalogVUMeter("R")
+        mode=self.config_doc.get("meter_display_mode", "led")
+        self.vu_left=AudioLevelMeter("L", display_mode=mode)
+        self.vu_right=AudioLevelMeter("R", display_mode=mode)
         # A real analogue VU face needs enough height to keep its arc round.
         # The former short top row made the scale look horizontally stretched.
         self.vu_left.setMinimumHeight(135)
@@ -1409,8 +1246,10 @@ class StudioMonitor(QMainWindow):
             lbl.setWordWrap(False)
             self.upcoming_events.append(lbl)
 
-        # Combined scheduler + BroadcastVoice/hour-close status.
-        bvp=Panel("SCHEDULER / BROADCASTVOICE · HOUR CLOSE")
+        # Combined read-only automation panel. BroadcastVoice is monitored only;
+        # HOUR WATCH observes the RadioBOSS Scheduler around the next full hour
+        # and never changes playback or the playlist.
+        bvp=Panel("SCHEDULER / BROADCASTVOICE · HOUR WATCH")
         bvp.layout.setContentsMargins(8,6,8,6)
         bvp.layout.setSpacing(2)
         scheduler_head=QLabel("SCHEDULER / UPCOMING")
@@ -1426,35 +1265,38 @@ class StudioMonitor(QMainWindow):
         for lbl in self.upcoming_events:
             bvp.layout.addWidget(lbl)
 
-        bv_head=QLabel("BROADCASTVOICE / HOUR CLOSE")
+        bv_head=QLabel("BROADCASTVOICE")
         bv_head.setObjectName("sectionTitle")
         bvp.layout.addWidget(bv_head)
         self.bv_state=QLabel("—"); self.bv_state.setObjectName("green")
         self.announcer=QLabel("ANNOUNCER: —")
         self.next_link=QLabel("NEXT LINK IN: —"); self.next_link.setObjectName("cyan")
-        self.anchor=QLabel("FULL HOUR BLOCK IN —"); self.anchor.setObjectName("bigGreen")
-        self.hour_block=QLabel("ANCHOR: —"); self.hour_block.setObjectName("cyan")
-        self.stop_mode=QLabel("STOP: —")
-        self.prepared=QLabel("PREPARED: —")
-        self.max_cut=QLabel("MAX CUT: —"); self.max_cut.setObjectName("cyan")
-        self.filler=QLabel("FILLER: —"); self.filler.setObjectName("green")
-
         bv_status=QHBoxLayout()
         bv_status.addWidget(self.bv_state)
         bv_status.addWidget(self.announcer)
         bv_status.addStretch()
         bvp.layout.addLayout(bv_status)
         bvp.layout.addWidget(self.next_link)
-        bvp.layout.addWidget(self.anchor)
-        bvp.layout.addWidget(self.hour_block)
-        mode_row=QHBoxLayout()
-        mode_row.addWidget(self.stop_mode)
-        mode_row.addWidget(self.prepared)
-        bvp.layout.addLayout(mode_row)
-        final_row=QHBoxLayout()
-        final_row.addWidget(self.max_cut)
-        final_row.addWidget(self.filler)
-        bvp.layout.addLayout(final_row)
+
+        hour_head=QLabel("HOUR WATCH · READ ONLY")
+        hour_head.setObjectName("sectionTitle")
+        bvp.layout.addWidget(hour_head)
+        self.hour_watch_status=QLabel("WATCHING")
+        self.hour_watch_status.setObjectName("green")
+        self.hour_watch_clock=QLabel("NEXT FULL HOUR — · IN --:--")
+        self.hour_watch_clock.setObjectName("bigGreen")
+        bvp.layout.addWidget(self.hour_watch_status)
+        bvp.layout.addWidget(self.hour_watch_clock)
+        self.hour_watch_events=[]
+        for _ in range(3):
+            lbl=QLabel("—")
+            lbl.setObjectName("muted")
+            lbl.setWordWrap(False)
+            self.hour_watch_events.append(lbl)
+            bvp.layout.addWidget(lbl)
+        self.hour_watch_note=QLabel("READ ONLY · NO PLAYLIST CONTROL")
+        self.hour_watch_note.setObjectName("muted")
+        bvp.layout.addWidget(self.hour_watch_note)
         bvp.layout.addStretch()
         grid.addWidget(bvp,1,3)
 
@@ -1590,6 +1432,10 @@ class StudioMonitor(QMainWindow):
         self.date_label.setText(time.strftime("%A · %d.%m.%Y"))
         self.analog_clock.update()
         self.hour_countdown.update()
+        now=time.localtime()
+        remaining=(59-now.tm_min)*60 + (60-now.tm_sec)
+        next_hour=(now.tm_hour+1)%24
+        self.hour_watch_clock.setText(f"NEXT FULL HOUR {next_hour:02d}:00:00 · IN {remaining//60:02d}:{remaining%60:02d}")
 
     def apply_station_name(self):
         station=self.config_doc.get("station") or {}
@@ -1617,9 +1463,8 @@ class StudioMonitor(QMainWindow):
         if cached["key"]==key and (cached["data"] or now-cached["attempt"]<30.0):
             return cached["data"]
 
-        action="trackartwork" if slot=="current" else "nexttrackartwork"
         try:
-            data=backend.fetch_bytes(backend.rb_url(cfg,action),timeout=1.5)
+            data=backend.rb_artwork(cfg,slot,track)
         except Exception:
             data=b""
         with self._art_cache_lock:
@@ -1639,8 +1484,10 @@ class StudioMonitor(QMainWindow):
                 d=backend.rb_state(cfg)
                 d["scheduler"]=backend.scheduler_state(cfg)
                 d["broadcastvoice"]=backend.bv_state(cfg)
+                d["hour_watch"]=backend.hour_watch_state(cfg)
                 if d.get("connected"):
                     d["playlist"]=backend.playlist_state(cfg,d.get("playback") or {},d.get("current") or {})
+                    d["next"]=backend.merge_next_track(d.get("next") or {}, d.get("playlist") or {})
 
                 if d.get("connected"):
                     d["_art_current_bytes"]=self._cached_artwork(
@@ -1751,6 +1598,9 @@ class StudioMonitor(QMainWindow):
         dialog.exec()
         if dialog.saved:
             self.config_doc=backend.load_public_config()
+            mode=self.config_doc.get("meter_display_mode", "led")
+            self.vu_left.set_display_mode(mode)
+            self.vu_right.set_display_mode(mode)
             app=QApplication.instance()
             if app is not None:
                 apply_theme(app,self.config_doc.get("theme","dark"))
@@ -1758,7 +1608,7 @@ class StudioMonitor(QMainWindow):
             self.timer.setInterval(max(750,int(self.config_doc.get("refresh_interval_ms") or 1500)))
             self._playlist_signature=None
             self._reset_artwork_cache()
-            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.14")
+            self.setWindowTitle(str(self.config_doc.get("application_title") or "RadioBOSS Studio Monitor")+" v1.0.18")
             self.apply_station_name()
             self.busy=False; self._weather_busy=False
             self.request_state(); self.request_weather()
@@ -1768,7 +1618,7 @@ class StudioMonitor(QMainWindow):
     def run_diagnose(self):
         cfg=backend.load_config()
         details=[
-            "Studio Monitor v1.0.14",
+            "Studio Monitor v1.0.18",
             f"Configuration: {backend.CONFIG}",
             f"Station: {cfg.get('_station_name') or '—'}",
             f"RadioBOSS: {cfg.get('radioboss_host')}:{cfg.get('radioboss_port')}",
@@ -1962,12 +1812,27 @@ class StudioMonitor(QMainWindow):
         self.bv_state.setStyleSheet(f"color:{GREEN if running else (AMBER if connected else RED)}")
         self.announcer.setText("ANNOUNCER: "+str(bv.get("announcer") or "—"))
         self.next_link.setText("NEXT LINK IN: "+str(bv.get("next_link") or "—"))
-        self.anchor.setText("FULL HOUR BLOCK IN "+str(bv.get("anchor_in") or "—"))
-        self.hour_block.setText("ANCHOR: "+str(bv.get("full_hour_block") or "—"))
-        self.stop_mode.setText("STOP: "+str(bv.get("stop_mode") or "—"))
-        self.prepared.setText("PREPARED: "+str(bv.get("prepared") or "—"))
-        self.max_cut.setText("MAX CUT: "+str(bv.get("max_cut") or "—"))
-        self.filler.setText("FILLER: "+str(bv.get("filler") or "—"))
+
+        hw=d.get("hour_watch") or {}
+        hw_status=str(hw.get("status") or "WATCHING")
+        hw_colour=(GREEN if hw_status in ("READY","ACTIVE") else
+                   AMBER if hw_status in ("NO HOUR EVENT","NO SCHEDULER") else
+                   RED if hw_status=="SCHEDULER ERROR" else CYAN)
+        self.hour_watch_status.setText(hw_status)
+        self.hour_watch_status.setStyleSheet(f"color:{hw_colour}")
+        for i,lbl in enumerate(self.hour_watch_events):
+            events=hw.get("events") or []
+            if i < len(events):
+                ev=events[i]
+                marker="PASSED · " if ev.get("passed") else ""
+                text=f"{marker}{ev.get('time') or '—'} · {ev.get('name') or 'Scheduler Event'}"
+                lbl.setText(text)
+                lbl.setToolTip(text)
+                lbl.setStyleSheet(f"color:{AMBER if ev.get('passed') else '#9fc7d5'}")
+            else:
+                lbl.setText("—")
+                lbl.setToolTip("")
+                lbl.setStyleSheet("")
 
         pl=d.get("playlist") or {}
         pl_source=str(pl.get("source") or "—")
@@ -2194,11 +2059,11 @@ def stylesheet(theme="dark"):
     """
 
 def main():
-    _set_windows_app_id()
+    set_windows_app_id()
     app=QApplication(sys.argv)
-    app.setApplicationName("RadioBOSS Studio Monitor")
-    app.setOrganizationName("RadioBOSSCommunity")
-    app.setWindowIcon(_application_icon())
+    icon_path=resource_path("studio_monitor_icon.png")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     document=backend.load_public_config()
     apply_theme(app,document.get("theme","dark"))
     if not bool(document.get("configured",False)):

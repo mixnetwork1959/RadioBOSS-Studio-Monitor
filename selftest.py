@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import py_compile
@@ -24,6 +25,10 @@ PLAYBACK=b'''<?xml version="1.0" encoding="utf-8"?>
   <NextTrack><TRACK ARTIST="Next Artist" TITLE="Next Song" FILENAME="C:\\Music\\next.mp3" DURATION="03:00" /></NextTrack>
 </Info>'''
 
+TINY_PNG=base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2QH8AAAAASUVORK5CYII="
+)
+
 PLAYLIST=b'''<?xml version="1.0" encoding="utf-8"?>
 <Playlist COUNT="3" TS="1">
   <TRACK STARTTIME="12:00:00" DURATION="03:20" FILENAME="C:\\Music\\current.mp3" PLAYLISTINDEX="1" INDEX="2" ARTIST="Test Artist" TITLE="Current Song" BPM="120" />
@@ -41,7 +46,22 @@ class MockRadioBOSS(BaseHTTPRequestHandler):
         if query.get("pass",[""])[0]!="test-secret":
             self.send_response(403); self.end_headers(); return
         action=query.get("action",[""])[0]
-        payload=PLAYBACK if action=="playbackinfo" else PLAYLIST if action in ("getplaylist2","getplaylist") else b""
+        if action=="playbackinfo":
+            payload=PLAYBACK
+        elif action in ("getplaylist2","getplaylist"):
+            payload=PLAYLIST
+        elif action in ("trackartwork","nexttrackartwork"):
+            # Simulate an API artwork miss/non-image response so the v1.0.16
+            # readtag fallback is exercised.
+            payload=b"NO ART"
+        elif action=="readtag":
+            payload=(
+                b'<TagInfo><File Artwork_Base64="'
+                + base64.b64encode(TINY_PNG)
+                + b'" /></TagInfo>'
+            )
+        else:
+            payload=b""
         self.send_response(200)
         self.send_header("Content-Type","text/xml")
         self.send_header("Content-Length",str(len(payload)))
@@ -54,8 +74,14 @@ def check(condition,message):
 
 
 def main():
-    for name in ("StudioMonitorNative.py","studio_monitor_backend.py","settings_dialog.py","secret_store.py","test_radioboss_api.py"):
+    for name in ("StudioMonitorNative.py","meter_widgets.py","studio_monitor_backend.py","settings_dialog.py","secret_store.py","test_radioboss_api.py"):
         py_compile.compile(str(BASE/name),doraise=True)
+
+    check((BASE/"studio_monitor_icon.png").is_file(),"application PNG icon missing")
+    check((BASE/"studio_monitor_icon.ico").is_file(),"application ICO icon missing")
+    build_text=(BASE/"BUILD-EXE.bat").read_text(encoding="utf-8",errors="replace")
+    check('--icon "%~dp0studio_monitor_icon.ico"' in build_text,"PyInstaller EXE icon flag missing")
+    check('--add-data "%~dp0studio_monitor_icon.png;."' in build_text,"bundled window icon resource missing")
 
     server=ThreadingHTTPServer(("127.0.0.1",0),MockRadioBOSS)
     thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
@@ -97,6 +123,11 @@ def main():
             playlist=backend.playlist_state(cfg,state.get("playback"),state.get("current"))
             check(playlist.get("ok"),playlist.get("error") or "playlist parse failed")
             check(any(x.get("status")=="PLAYING" for x in playlist.get("tracks") or []),"playing row not detected")
+
+            fallback_next=backend.merge_next_track({},playlist)
+            check(fallback_next.get("title")=="Next Song","playlist fallback did not restore missing NextTrack")
+            art=backend.rb_artwork(cfg,"current",state.get("current") or {})
+            check(backend._looks_like_image(art),"readtag artwork fallback did not return image bytes")
             check(backend.weather_state(cfg).get("disabled"),"weather-disabled mode failed")
 
             loaded["station"]["radioboss_password"]="changed-secret"
@@ -108,7 +139,7 @@ def main():
             bv_root=Path(folder)/"BroadcastVoice"
             (bv_root/"runtime").mkdir(parents=True)
             (bv_root/"config.json").write_text(
-                json.dumps({"announcer":"RIGHT-CONFIG","hour_close":{}}),
+                json.dumps({"announcer":"RIGHT-CONFIG"}),
                 encoding="utf-8",
             )
             legacy_state=bv_root/"runtime"/"state.json"
@@ -118,6 +149,28 @@ def main():
                 "broadcastvoice_status_file":str(legacy_state),
             })
             check(bv.get("announcer")=="RIGHT-CONFIG","legacy BroadcastVoice status file bypassed directory discovery")
+
+            # Hour Watch is read-only and derives its information only from
+            # the RadioBOSS Scheduler file around the next full hour.
+            now_dt=backend.datetime.now()
+            next_hour=now_dt.replace(minute=0,second=0,microsecond=0)+backend.timedelta(hours=1)
+            marker_dt=next_hour-backend.timedelta(seconds=10)
+            hours=["0"]*24; hours[marker_dt.hour]="1"
+            sdl_path=Path(folder)/"Admin.sdl"
+            sdl_path.write_text(
+                "[Event0]\n"
+                "EnabledEvent=1\n"
+                "TaskName=Full Hour Test Marker\n"
+                "TimeType=1\n"
+                f"Hours={''.join(hours)}\n"
+                f"Minutes={marker_dt.minute}\n"
+                f"Seconds={marker_dt.second}\n"
+                "Days=1111111\n",
+                encoding="utf-8",
+            )
+            hw=backend.hour_watch_state({"scheduler_admin_sdl":str(sdl_path)})
+            check(hw.get("read_only") is True,"Hour Watch lost read-only flag")
+            check(any(x.get("name")=="Full Hour Test Marker" for x in hw.get("events") or []),"Hour Watch did not find the full-hour Scheduler event")
 
             # v1.0.12 must import only the first profile from an older
             # two-station config and immediately expose the new singular form.
@@ -141,14 +194,17 @@ def main():
 
     print("SELFTEST OK")
     print("- source syntax")
+    print("- packaged application icon resources")
     print("- first-run configuration")
     print("- protected credential storage")
     print("- light/dark theme configuration")
     print("- single local station configuration and legacy migration")
     print("- RadioBOSS playback XML")
-    print("- RadioBOSS playlist XML")
+    print("- RadioBOSS playlist XML and NextTrack fallback")
+    print("- artwork validation and readtag fallback")
     print("- weather-disabled mode")
     print("- directory-based BroadcastVoice status")
+    print("- passive Hour Watch scheduler detection")
     return 0
 
 

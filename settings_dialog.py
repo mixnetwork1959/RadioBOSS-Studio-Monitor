@@ -104,12 +104,16 @@ class SettingsDialog(QDialog):
         self.theme=QComboBox()
         self.theme.addItem("Dark","dark")
         self.theme.addItem("Light","light")
+        self.meter_display_mode=QComboBox()
+        self.meter_display_mode.addItem("LED","led")
+        self.meter_display_mode.addItem("VU","vu")
         self.refresh_ms=QSpinBox(); self.refresh_ms.setRange(750,10000); self.refresh_ms.setSingleStep(250); self.refresh_ms.setSuffix(" ms")
         self.playlist_rows=QSpinBox(); self.playlist_rows.setRange(5,50)
         self.start_maximized=QCheckBox("Start maximized")
         self.audio_meter=QCheckBox("Enable Windows output audio meters")
         form.addRow("Application title",self.app_title)
         form.addRow("Theme",self.theme)
+        form.addRow("Level display",self.meter_display_mode)
         form.addRow("RadioBOSS refresh",self.refresh_ms)
         form.addRow("Maximum playlist rows",self.playlist_rows)
         form.addRow("",self.start_maximized)
@@ -195,7 +199,8 @@ class SettingsDialog(QDialog):
 
         info=QLabel(
             "These integration paths belong to this local station only. Select the RadioBOSS "
-            "Scheduler SDL file and the local BroadcastVoice folder. Leave an integration empty when unused."
+            "Scheduler SDL file and the local BroadcastVoice folder. Hour Watch uses the same "
+            "Scheduler file read-only and needs no separate setting. Leave an integration empty when unused."
         )
         info.setWordWrap(True); info.setObjectName("muted")
         outer.addWidget(info)
@@ -217,6 +222,8 @@ class SettingsDialog(QDialog):
         self.app_title.setText(str(d.get("application_title") or "RadioBOSS Studio Monitor"))
         theme_index=self.theme.findData(str(d.get("theme") or "dark").lower())
         self.theme.setCurrentIndex(theme_index if theme_index>=0 else 0)
+        mode=backend.normalize_meter_display_mode(d.get("meter_display_mode"))
+        self.meter_display_mode.setCurrentIndex(self.meter_display_mode.findData(mode))
         self.refresh_ms.setValue(int(d.get("refresh_interval_ms") or 1500))
         self.playlist_rows.setValue(int(d.get("playlist_rows") or 16))
         self.start_maximized.setChecked(bool(d.get("start_maximized",True)))
@@ -305,6 +312,7 @@ class SettingsDialog(QDialog):
             "configured":True,
             "application_title":self.app_title.text().strip() or "RadioBOSS Studio Monitor",
             "theme":str(self.theme.currentData() or "dark"),
+            "meter_display_mode":str(self.meter_display_mode.currentData() or "led"),
             "refresh_interval_ms":self.refresh_ms.value(),
             "playlist_rows":self.playlist_rows.value(),
             "start_maximized":self.start_maximized.isChecked(),
