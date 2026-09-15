@@ -19,12 +19,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp -f studio_monitor.ico /tmp/studio_monitor_icon.ico 2>/dev/null || true
+          cp -f studio_monitor_icon.png /tmp/studio_monitor_icon.png 2>/dev/null || true
           cat .bootstrap/part* > /tmp/source.b64
           base64 -d /tmp/source.b64 > /tmp/source.tar.gz
           mkdir -p /tmp/release
           tar -xzf /tmp/source.tar.gz -C /tmp/release
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a /tmp/release/. .
+          if [ -f /tmp/studio_monitor_icon.ico ]; then cp -f /tmp/studio_monitor_icon.ico studio_monitor_icon.ico; fi
+          if [ -f /tmp/studio_monitor_icon.png ]; then cp -f /tmp/studio_monitor_icon.png studio_monitor_icon.png; fi
           cat > .gitignore <<'EOF'
           __pycache__/
           *.py[cod]
