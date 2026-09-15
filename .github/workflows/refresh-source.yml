@@ -3,7 +3,7 @@ name: Refresh Studio Monitor source
 on:
   push:
     paths:
-      - '.bootstrap9/READY'
+      - '.refresh-v1018/READY'
 
 permissions:
   contents: write
@@ -19,12 +19,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp -f studio_monitor.ico /tmp/studio_monitor_icon.ico 2>/dev/null || true
+          cp -f studio_monitor.ico /tmp/studio_monitor_icon.ico 2>/dev/null || cp -f studio_monitor_icon.ico /tmp/studio_monitor_icon.ico 2>/dev/null || true
           cp -f studio_monitor_icon.png /tmp/studio_monitor_icon.png 2>/dev/null || true
-          cat .bootstrap9/part* > /tmp/source.b64
+          cat .refresh-v1018/source-part-* > /tmp/source.b64
           base64 -d /tmp/source.b64 > /tmp/source.tar.gz
           mkdir -p /tmp/release
-          tar -xzf /tmp/source.tar.gz -C /tmp/release
+          tar --warning=no-timestamp -xzf /tmp/source.tar.gz -C /tmp/release
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a /tmp/release/. .
           if [ -f /tmp/studio_monitor_icon.ico ]; then cp -f /tmp/studio_monitor_icon.ico studio_monitor_icon.ico; fi
